@@ -1,0 +1,138 @@
+{
+  "rabbit_version": "4.2.3",
+  "rabbitmq_version": "4.2.3",
+  "users": [],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [],
+  "topic_permissions": [],
+  "parameters": [],
+  "global_parameters": [],
+  "policies": [],
+  "queues": [
+    {
+      "name": "interactions.reviews",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dcic.events.dlx",
+        "x-dead-letter-routing-key": "dead-letter.interactions.reviews"
+      }
+    },
+    {
+      "name": "interactions.votes",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dcic.events.dlx",
+        "x-dead-letter-routing-key": "dead-letter.interactions.votes"
+      }
+    },
+    {
+      "name": "catalog.cleaning",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dcic.events.dlx",
+        "x-dead-letter-routing-key": "dead-letter.catalog.cleaning"
+      }
+    },
+    {
+      "name": "dead-letter.interactions.reviews",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "dead-letter.interactions.votes",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "dead-letter.catalog.cleaning",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "dcic.events",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "dcic.events.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "dcic.events",
+      "vhost": "/",
+      "destination": "interactions.reviews",
+      "destination_type": "queue",
+      "routing_key": "interaction.review.created",
+      "arguments": {}
+    },
+    {
+      "source": "dcic.events",
+      "vhost": "/",
+      "destination": "interactions.votes",
+      "destination_type": "queue",
+      "routing_key": "interaction.vote.created",
+      "arguments": {}
+    },
+    {
+      "source": "dcic.events",
+      "vhost": "/",
+      "destination": "catalog.cleaning",
+      "destination_type": "queue",
+      "routing_key": "catalog.cleaning.requested",
+      "arguments": {}
+    },
+    {
+      "source": "dcic.events.dlx",
+      "vhost": "/",
+      "destination": "dead-letter.interactions.reviews",
+      "destination_type": "queue",
+      "routing_key": "dead-letter.interactions.reviews",
+      "arguments": {}
+    },
+    {
+      "source": "dcic.events.dlx",
+      "vhost": "/",
+      "destination": "dead-letter.interactions.votes",
+      "destination_type": "queue",
+      "routing_key": "dead-letter.interactions.votes",
+      "arguments": {}
+    },
+    {
+      "source": "dcic.events.dlx",
+      "vhost": "/",
+      "destination": "dead-letter.catalog.cleaning",
+      "destination_type": "queue",
+      "routing_key": "dead-letter.catalog.cleaning",
+      "arguments": {}
+    }
+  ]
+}

@@ -1,0 +1,263 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_GATEWAY_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    networks:
+      - frontend_gateway
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+    environment:
+      SERVICE_NAME: gateway
+      CATALOG_SERVICE_URL: http://catalog-service:8000
+      RECOMMENDATION_SERVICE_URL: http://recommendation-service:8000
+      INTERACTION_SERVICE_URL: http://interaction-service:8000
+    ports:
+      - "8000:8000"
+    networks:
+      - frontend_gateway
+      - backend
+    depends_on:
+      catalog-service:
+        condition: service_healthy
+      recommendation-service:
+        condition: service_healthy
+      interaction-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  catalog-service:
+    build:
+      context: ./catalog-service
+    environment:
+      SERVICE_NAME: catalog-service
+      MONGODB_URI: "mongodb://${MONGODB_CATALOG_USER:-flix_catalog}:${MONGODB_CATALOG_PASSWORD:-catalog_local_dev}@mongodb:27017/${MONGODB_DATABASE:-peliculas-proyectos}?authSource=${MONGODB_DATABASE:-peliculas-proyectos}"
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+    networks:
+      - backend
+      - data
+    depends_on:
+      dataset-loader:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  cleaning-agent:
+    build:
+      context: ./cleaning-agent
+    environment:
+      SERVICE_NAME: cleaning-agent
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-flix}:${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}@rabbitmq:5672/"
+      RABBITMQ_CLEANING_QUEUE: catalog.cleaning
+    networks:
+      - messaging
+      - llm_egress
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  recommendation-service:
+    build:
+      context: ./recommendation-service
+    environment:
+      SERVICE_NAME: recommendation-service
+      MONGODB_URI: "mongodb://${MONGODB_RECOMMENDATION_USER:-flix_recommendation}:${MONGODB_RECOMMENDATION_PASSWORD:-recommendation_local_dev}@mongodb:27017/${MONGODB_DATABASE:-peliculas-proyectos}?authSource=${MONGODB_DATABASE:-peliculas-proyectos}"
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+    networks:
+      - backend
+      - data
+    depends_on:
+      dataset-loader:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  interaction-service:
+    build:
+      context: ./interaction-service
+    environment:
+      SERVICE_NAME: interaction-service
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-flix}:${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}@rabbitmq:5672/"
+      RABBITMQ_EXCHANGE: dcic.events
+      RABBITMQ_REVIEW_ROUTING_KEY: interaction.review.created
+      RABBITMQ_VOTE_ROUTING_KEY: interaction.vote.created
+    networks:
+      - backend
+      - messaging
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  consumer:
+    build:
+      context: ./consumer
+    environment:
+      SERVICE_NAME: consumer
+      MONGODB_URI: "mongodb://${MONGODB_CONSUMER_USER:-flix_consumer}:${MONGODB_CONSUMER_PASSWORD:-consumer_local_dev}@mongodb:27017/${MONGODB_DATABASE:-peliculas-proyectos}?authSource=${MONGODB_DATABASE:-peliculas-proyectos}"
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-flix}:${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}@rabbitmq:5672/"
+      RABBITMQ_REVIEW_QUEUE: interactions.reviews
+      RABBITMQ_VOTE_QUEUE: interactions.votes
+    networks:
+      - data
+      - messaging
+    depends_on:
+      dataset-loader:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os; os.kill(1, 0)"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  dataset-loader:
+    build:
+      context: ./dataset-loader
+    environment:
+      MONGODB_URI: "mongodb://${MONGO_INITDB_ROOT_USERNAME:-flix}:${MONGO_INITDB_ROOT_PASSWORD:-flix_local_dev_only}@mongodb:27017/?authSource=admin"
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      DATASET_DIRECTORY: /dataset
+    volumes:
+      - ./dataset:/dataset:ro
+    networks:
+      - data
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: on-failure
+
+  mongodb:
+    image: mongo:8.0.12
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-flix}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-flix_local_dev_only}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      MONGODB_CATALOG_USER: ${MONGODB_CATALOG_USER:-flix_catalog}
+      MONGODB_CATALOG_PASSWORD: ${MONGODB_CATALOG_PASSWORD:-catalog_local_dev}
+      MONGODB_RECOMMENDATION_USER: ${MONGODB_RECOMMENDATION_USER:-flix_recommendation}
+      MONGODB_RECOMMENDATION_PASSWORD: ${MONGODB_RECOMMENDATION_PASSWORD:-recommendation_local_dev}
+      MONGODB_CONSUMER_USER: ${MONGODB_CONSUMER_USER:-flix_consumer}
+      MONGODB_CONSUMER_PASSWORD: ${MONGODB_CONSUMER_PASSWORD:-consumer_local_dev}
+    volumes:
+      - mongo_data:/data/db
+      - ./dataset/mongo-init.sh:/docker-entrypoint-initdb.d/10-mongo-init.sh:ro
+    networks:
+      - data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)"'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.2.3-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-flix}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    networks:
+      - messaging
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  rabbitmq_data:
+  frontend_node_modules:
+
+networks:
+  frontend_gateway:
+    internal: true
+  backend:
+    internal: true
+  data:
+    internal: true
+  messaging:
+    internal: true
+  llm_egress:
