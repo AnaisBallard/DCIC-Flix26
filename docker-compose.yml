@@ -11,6 +11,7 @@ services:
       - frontend_node_modules:/app/node_modules
     networks:
       - frontend_gateway
+      - host_ingress
     depends_on:
       gateway:
         condition: service_healthy
@@ -30,6 +31,7 @@ services:
     networks:
       - frontend_gateway
       - backend
+      - host_ingress
     depends_on:
       catalog-service:
         condition: service_healthy
@@ -89,8 +91,8 @@ services:
       - messaging
       - llm_egress
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -141,8 +143,8 @@ services:
       - backend
       - messaging
     depends_on:
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -172,8 +174,8 @@ services:
     depends_on:
       dataset-loader:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
+      rabbitmq-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -192,6 +194,12 @@ services:
     environment:
       MONGODB_URI: "mongodb://${MONGO_INITDB_ROOT_USERNAME:-flix}:${MONGO_INITDB_ROOT_PASSWORD:-flix_local_dev_only}@mongodb:27017/?authSource=admin"
       MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      MONGODB_CATALOG_USER: ${MONGODB_CATALOG_USER:-flix_catalog}
+      MONGODB_CATALOG_PASSWORD: ${MONGODB_CATALOG_PASSWORD:-catalog_local_dev}
+      MONGODB_RECOMMENDATION_USER: ${MONGODB_RECOMMENDATION_USER:-flix_recommendation}
+      MONGODB_RECOMMENDATION_PASSWORD: ${MONGODB_RECOMMENDATION_PASSWORD:-recommendation_local_dev}
+      MONGODB_CONSUMER_USER: ${MONGODB_CONSUMER_USER:-flix_consumer}
+      MONGODB_CONSUMER_PASSWORD: ${MONGODB_CONSUMER_PASSWORD:-consumer_local_dev}
       DATASET_DIRECTORY: /dataset
     volumes:
       - ./dataset:/dataset:ro
@@ -250,6 +258,23 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  rabbitmq-init:
+    image: rabbitmq:4.2.3-management
+    entrypoint: ["/bin/sh", "/opt/dcic/reconcile-user.sh"]
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-flix}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}
+      RABBITMQ_NODENAME: rabbit@rabbitmq
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq:ro
+      - ./rabbitmq/reconcile-user.sh:/opt/dcic/reconcile-user.sh:ro
+    networks:
+      - messaging
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
   mongo_data:
   rabbitmq_data:
@@ -258,6 +283,7 @@ volumes:
 networks:
   frontend_gateway:
     internal: true
+  host_ingress:
   backend:
     internal: true
   data:

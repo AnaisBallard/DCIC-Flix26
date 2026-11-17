@@ -26,6 +26,8 @@ recommandations restent hors périmètre; aucun appel au LLM n’est effectué.
 
 - `frontend_gateway` : frontend et gateway seulement, réseau interne. Le frontend
   ne peut ni résoudre MongoDB/RabbitMQ ni accéder aux réseaux de données.
+- `host_ingress` : frontend et gateway uniquement; permet la publication de
+  leurs ports HTTP sur l’hôte, sans connecter le frontend aux réseaux de données.
 - `backend` : gateway, services HTTP internes et endpoint de santé du consumer;
   MongoDB et RabbitMQ n’y sont pas attachés.
 - `data` : MongoDB, services catalogue/recommandation, consumer et chargeur.

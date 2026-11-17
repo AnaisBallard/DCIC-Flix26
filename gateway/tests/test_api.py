@@ -50,6 +50,16 @@ async def test_movie_search_is_forwarded_with_validated_filters():
 
 
 @pytest.mark.asyncio
+async def test_optional_filters_are_omitted_when_not_provided():
+    response = await request_with_upstream("GET", "/api/movies", params={"q": "fish"})
+
+    assert response.status_code == 200
+    upstream_url = response.json()["url"]
+    assert "q=fish" in upstream_url
+    assert "genre=" not in upstream_url
+
+
+@pytest.mark.asyncio
 async def test_invalid_movie_id_is_rejected_before_forwarding():
     response = await request_with_upstream("GET", "/api/movies/not-an-object-id")
 

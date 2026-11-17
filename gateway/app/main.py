@@ -73,7 +73,11 @@ async def forward(
         upstream = await client.request(
             method,
             f"{service_url(service)}{path}",
-            params=params,
+            params=(
+                {key: value for key, value in params.items() if value is not None}
+                if params is not None
+                else None
+            ),
             json=payload.model_dump(mode="json") if payload is not None else None,
         )
     except httpx.TimeoutException as error:

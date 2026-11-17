@@ -37,6 +37,11 @@ qu’après publication RabbitMQ et consommation par le consumer. Les contrats
 HTTP et événements sont décrits dans [docs/contracts.md](docs/contracts.md).
 Le nettoyage et les recommandations ne sont pas implémentés.
 
+Au démarrage, `rabbitmq-init` synchronise le mot de passe déclaré dans `.env`
+avec le compte du volume RabbitMQ persistant et configure ses permissions. Cela
+évite qu’un volume créé avec un ancien mot de passe empêche les services de se
+connecter; les données et la topologie RabbitMQ ne sont pas supprimées.
+
 Routes principales :
 
 | Route | Fonction |
