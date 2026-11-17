@@ -24,6 +24,7 @@ services:
       CATALOG_SERVICE_URL: http://catalog-service:8000
       RECOMMENDATION_SERVICE_URL: http://recommendation-service:8000
       INTERACTION_SERVICE_URL: http://interaction-service:8000
+      CONSUMER_SERVICE_URL: http://consumer:8000
     ports:
       - "8000:8000"
     networks:
@@ -35,6 +36,8 @@ services:
       recommendation-service:
         condition: service_healthy
       interaction-service:
+        condition: service_healthy
+      consumer:
         condition: service_healthy
     healthcheck:
       test:
@@ -163,6 +166,7 @@ services:
       RABBITMQ_REVIEW_QUEUE: interactions.reviews
       RABBITMQ_VOTE_QUEUE: interactions.votes
     networks:
+      - backend
       - data
       - messaging
     depends_on:
@@ -175,7 +179,7 @@ services:
         - CMD
         - python
         - -c
-        - "import os; os.kill(1, 0)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"
       interval: 10s
       timeout: 3s
       retries: 5

@@ -20,7 +20,7 @@ docker compose up --build
 ```
 
 - Frontend Vite : <http://localhost:5173>
-- Gateway (contrôle de santé uniquement) : <http://localhost:8000/health>
+- Gateway : <http://localhost:8000>; état global : <http://localhost:8000/api/health>
 - MongoDB et RabbitMQ ne publient aucun port sur l’hôte; ils sont accessibles
   uniquement depuis les réseaux internes et les commandes `docker compose exec`.
 
@@ -31,9 +31,25 @@ fichier; les documents source doivent inclure `_id`. Un dossier sans données es
 signalé dans les logs, sans génération de données artificielles.
 
 RabbitMQ importe exchanges, queues, bindings et files de lettres mortes depuis
-`rabbitmq/definitions.json`. Les services HTTP exposent uniquement un contrôle
-de santé. Les contrats métier, le traitement des messages et le nettoyage du
-dataset ne sont pas encore implémentés.
+`rabbitmq/definitions.json`. La gateway transmet les requêtes catalogue et
+critiques aux services dédiés; les interactions ne sont stockées dans MongoDB
+qu’après publication RabbitMQ et consommation par le consumer. Les contrats
+HTTP et événements sont décrits dans [docs/contracts.md](docs/contracts.md).
+Le nettoyage et les recommandations ne sont pas implémentés.
+
+Routes principales :
+
+| Route | Fonction |
+| --- | --- |
+| `GET /api/movies?q=&genre=&page=1&page_size=20` | Rechercher et filtrer le catalogue |
+| `GET /api/movies/{movie_id}` | Consulter un film |
+| `GET /api/movies/{movie_id}/reviews` | Lire les critiques historiques |
+| `POST /api/interactions/reviews` | Publier une note et un commentaire |
+| `GET /api/health` | Vérifier les services aval, dont MongoDB et RabbitMQ via leurs services |
+
+La recherche catalogue porte sur le titre, le résumé et le synopsis. Les
+identifiants de film sont les ObjectId MongoDB du dataset (24 caractères
+hexadécimaux). La lecture des critiques n’expose pas les adresses e-mail.
 
 Les identifiants de `.env.example` sont réservés au développement local.
 Remplacez-les avant tout déploiement partagé. Gardez les identifiants MongoDB
@@ -101,6 +117,26 @@ py -3.13 -m venv .venv
 python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+### Tests backend
+
+Depuis la racine du dépôt, installez les dépendances de test dans un
+environnement virtuel Python 3.13, puis lancez toutes les suites :
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r gateway\requirements-dev.txt -r catalog-service\requirements-dev.txt -r interaction-service\requirements-dev.txt -r consumer\requirements-dev.txt
+python -m pytest -q
+```
+
+Les tests couvrent les validations, la recherche/pagination, le filtrage des
+champs privés, l’idempotence, l’acquittement après persistance et les erreurs
+de broker/base. Le test de flux exerce la gateway et les applications HTTP
+réelles des services catalogue et interaction dans le même processus, avec des
+adaptateurs simulés pour MongoDB et RabbitMQ. Pour vérifier les conteneurs et
+les connexions aux vraies instances MongoDB/RabbitMQ, Docker Desktop doit être
+démarré.
 
 ## Structure
 

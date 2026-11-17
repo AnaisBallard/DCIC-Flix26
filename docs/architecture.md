@@ -6,28 +6,28 @@
 flowchart LR
     Browser[Navigateur] --> Frontend[React / Vite]
     Frontend --> Gateway[Gateway FastAPI]
+    Gateway -. health .-> Consumer[Consumer]
     Gateway --> Catalog[Catalog service]
     Gateway --> Recommendations[Recommendation service]
     Gateway --> Interactions[Interaction service]
     Catalog --> Mongo[(MongoDB)]
     Recommendations --> Mongo
     Interactions --> Broker[RabbitMQ]
-    Broker --> Consumer[Consumer]
+    Broker --> Consumer
     Broker --> Cleaning[Cleaning agent]
     Loader[Dataset loader] --> Mongo
     Cleaning --> LLM[LLM externe]
 ```
 
-Cette vue décrit les responsabilités visées, pas des flux métier déjà
-implémentés. Les services HTTP fournissent uniquement `/health`; le consumer
-reste inactif et aucun appel au LLM n’est effectué.
+Les flux de catalogue et de critiques sont implémentés. Le nettoyage et les
+recommandations restent hors périmètre; aucun appel au LLM n’est effectué.
 
 ## Réseaux et exposition
 
 - `frontend_gateway` : frontend et gateway seulement, réseau interne. Le frontend
   ne peut ni résoudre MongoDB/RabbitMQ ni accéder aux réseaux de données.
-- `backend` : gateway et services HTTP internes; MongoDB et RabbitMQ n’y sont
-  pas attachés.
+- `backend` : gateway, services HTTP internes et endpoint de santé du consumer;
+  MongoDB et RabbitMQ n’y sont pas attachés.
 - `data` : MongoDB, services catalogue/recommandation, consumer et chargeur.
 - `messaging` : RabbitMQ, interaction-service, cleaning-agent et consumer.
 - `llm_egress` : seule sortie réseau externe du cleaning-agent.
@@ -74,16 +74,18 @@ queue ou binding ne demande de création manuelle.
 ## Responsabilités des services
 
 - **Frontend** : React/TypeScript et Vite; requêtes via la gateway publiée.
-- **Gateway** : point d’entrée HTTP; URL Compose des trois services HTTP
-  configurées par variables d’environnement.
-- **Catalog service** : futur accès en lecture au catalogue MongoDB.
+- **Gateway** : point d’entrée HTTP; valide les entrées, relaie les routes de
+  catalogue/critiques et agrège l’état de santé des services HTTP.
+- **Catalog service** : recherche, filtre genre, pagination, détails et critiques
+  historiques depuis MongoDB; les courriels ne sont jamais renvoyés.
 - **Cleaning agent** : futur traitement LLM et consommation des événements; le
   SDK OpenAI est prévu, avec la clé fournie par variable d’environnement.
 - **Recommendation service** : futur TF-IDF et similarité cosinus sur les
   données MongoDB.
-- **Interaction service** : futur point d’entrée pour votes/critiques et
-  publication RabbitMQ.
-- **Consumer** : futur traitement des messages RabbitMQ et persistance MongoDB.
+- **Interaction service** : valide notes et commentaires, publie des événements
+  persistants confirmés par RabbitMQ et n’accède pas à MongoDB.
+- **Consumer** : valide les événements de critique, les écrit idempotemment dans
+  MongoDB et acquitte seulement après la réussite de la persistance.
 - **Dataset loader** : import idempotent des sources du dataset et synchronisation
   des comptes applicatifs/indexes au démarrage.
 
@@ -92,14 +94,19 @@ qu’en cas d’échec. Les volumes MongoDB et RabbitMQ survivent aux redémarra
 Les variables locales sont documentées dans `.env.example`; les identifiants
 d’exemple doivent être remplacés avant tout déploiement partagé.
 
-## Flux cible
+## Flux d’interaction
 
 1. Le navigateur envoie ses requêtes à la gateway.
-2. La gateway délègue au service responsable de la ressource.
-3. Les interactions publieront des événements dans RabbitMQ.
-4. Le consumer et le cleaning agent traiteront les événements adaptés.
-5. Le chargeur importe les fichiers du dataset dans MongoDB; le service de
-   recommandation utilisera ensuite les données textuelles.
+2. La gateway délègue la recherche et la lecture au service catalogue.
+3. La gateway transmet les nouvelles critiques au service interaction.
+4. Le service interaction publie sur `dcic.events` avec la routing key
+   `interaction.review.created`; RabbitMQ confirme le message persistant.
+5. Le consumer récupère `interactions.reviews`, valide le contrat, écrit un
+   document d’`_id` égal à l’identifiant d’événement puis acquitte le message.
+   Une erreur MongoDB provoque un nack avec requeue; un message invalide est
+   rejeté vers la dead-letter queue.
+6. La gateway vérifie le catalogue, l’interaction, le consumer et la
+   recommandation via `/api/health`. Le healthcheck local `/health` ne vérifie
+   que la gateway.
 
-Les contrats HTTP, événements, politiques de reprise et schémas MongoDB restent
-à définir avant d’implémenter ces flux métier.
+Voir [contracts.md](contracts.md) pour les schémas HTTP et événements.
