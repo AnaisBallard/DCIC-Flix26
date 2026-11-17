@@ -75,7 +75,10 @@ queue ou binding ne demande de création manuelle.
 
 ## Responsabilités des services
 
-- **Frontend** : React/TypeScript et Vite; requêtes via la gateway publiée.
+- **Frontend** : React/TypeScript, Vite et Tailwind CSS; accueil éditorial,
+  recherche/filtrage du catalogue, fiches et critiques via la gateway. Les
+  recommandations personnalisées et les rapports d’audit restent signalés
+  comme indisponibles jusqu’à l’exposition de leurs API.
 - **Gateway** : point d’entrée HTTP; valide les entrées, relaie les routes de
   catalogue/critiques et agrège l’état de santé des services HTTP.
 - **Catalog service** : recherche, filtre genre, pagination, détails et critiques

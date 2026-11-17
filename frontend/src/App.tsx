@@ -1,38 +1,46 @@
-function App() {
-  return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-white/10">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-          <a className="text-xl font-bold tracking-tight text-red-500" href="/">
-            DCIC <span className="text-zinc-100">FLIX</span>
-          </a>
-          <span className="rounded-full border border-white/15 px-3 py-1 text-xs text-zinc-400">
-            Projet universitaire
-          </span>
-        </nav>
-      </header>
+import { useState } from "react";
+import { Route, Routes } from "react-router-dom";
+import { Footer } from "./components/Footer";
+import { Header } from "./components/Header";
+import { AuditPage } from "./pages/AuditPage";
+import { ExplorePage } from "./pages/ExplorePage";
+import { HomePage } from "./pages/HomePage";
+import { MovieDetailPage } from "./pages/MovieDetailPage";
 
-      <section className="mx-auto flex max-w-6xl flex-col px-6 pb-24 pt-24">
-        <p className="mb-5 text-sm font-semibold uppercase tracking-[0.25em] text-red-400">
-          DCIC-Flix26
-        </p>
-        <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-6xl">
-          Votre cinéma, prêt à prendre forme.
-        </h1>
-        <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-400">
-          La plateforme et ses services sont en cours de préparation. Le
-          catalogue universitaire sera présenté ici une fois son intégration
-          développée.
-        </p>
-        <div className="mt-12 rounded-2xl border border-white/10 bg-white/[0.03] p-6 sm:p-8">
-          <h2 className="text-lg font-medium">Catalogue en préparation</h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-400">
-            Aucune fiche de film de démonstration n’est affichée. Les données
-            seront connectées depuis le dataset du projet.
-          </p>
-        </div>
-      </section>
-    </main>
+const profileStorageKey = "dcic-flix-profiles";
+
+function initialUserId() {
+  try {
+    const stored = localStorage.getItem(profileStorageKey);
+    if (stored) {
+      const profiles = JSON.parse(stored) as { id?: string }[];
+      if (Array.isArray(profiles) && profiles[0]?.id) return profiles[0].id;
+    }
+  } catch {
+    localStorage.removeItem(profileStorageKey);
+  }
+  const profile = { id: `usr_${crypto.randomUUID()}`, label: "Mi perfil" };
+  localStorage.setItem(profileStorageKey, JSON.stringify([profile]));
+  return profile.id;
+}
+
+function App() {
+  const [userId, setUserId] = useState(initialUserId);
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#contenido">Saltar al contenido</a>
+      <Header userId={userId} onUserChange={setUserId} />
+      <div id="contenido">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/explorar" element={<ExplorePage />} />
+          <Route path="/pelicula/:movieId" element={<MovieDetailPage userId={userId} />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="*" element={<main className="detail-state"><span className="eyebrow">404 · FUERA DEL ARCHIVO</span><h1>Esta historia no está aquí.</h1><p>Puede que el enlace haya cambiado.</p><a className="text-link" href="/"><span>Volver al inicio</span></a></main>} />
+        </Routes>
+      </div>
+      <Footer />
+    </div>
   );
 }
 

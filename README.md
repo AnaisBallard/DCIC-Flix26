@@ -1,8 +1,9 @@
 # DCIC-Flix26
 
-Socle d’une plateforme universitaire de cinéma en microservices. Ce dépôt fournit
-la structure, les environnements et l’infrastructure de développement; les
-fonctionnalités métier restent à construire.
+Plateforme universitaire de découverte de films en microservices. Le frontend
+propose une expérience éditoriale en espagnol et se connecte au catalogue et aux
+critiques via la gateway; le nettoyage et les recommandations métier restent à
+développer.
 
 ## Prérequis
 
@@ -35,7 +36,20 @@ RabbitMQ importe exchanges, queues, bindings et files de lettres mortes depuis
 critiques aux services dédiés; les interactions ne sont stockées dans MongoDB
 qu’après publication RabbitMQ et consommation par le consumer. Les contrats
 HTTP et événements sont décrits dans [docs/contracts.md](docs/contracts.md).
-Le nettoyage et les recommandations ne sont pas implémentés.
+Le nettoyage et les recommandations ne sont pas implémentés. L’interface
+l’indique sans afficher de recommandations ni de statistiques d’audit fictives.
+
+### Interface web
+
+- `/` : accueil éditorial, affiches du dataset et genres disponibles.
+- `/explorar` : recherche, filtre par genre, tri et pagination du catalogue.
+- `/pelicula/{movie_id}` : fiche, critiques existantes et formulaire d’avis.
+- `/audit` : état réel des services; les rapports de nettoyage et du LLM sont
+  signalés comme indisponibles jusqu’à l’ajout de leurs API.
+
+Les profils sont locaux au navigateur; leurs identifiants servent aux critiques.
+Le frontend ne communique qu’avec la gateway. Les affiches sont celles fournies
+par le catalogue, sans films de démonstration.
 
 Au démarrage, `rabbitmq-init` synchronise le mot de passe déclaré dans `.env`
 avec le compte du volume RabbitMQ persistant et configure ses permissions. Cela
@@ -170,7 +184,9 @@ images Docker utilisent des tags précis.
 | Composant | Version |
 | --- | --- |
 | Node.js (frontend) | 24.11.1 |
-| React / React DOM | 19.3.1 / 19.3.0 |
+| React / React DOM | 19.3.1 / 19.3.1 |
+| React Router | 7.18.5 |
+| Lucide React | 1.74.0 |
 | TypeScript | 7.0.2 |
 | Vite / plugin React | 8.3.8 / 6.3.0 |
 | Tailwind CSS / plugin Vite | 4.3.5 |
