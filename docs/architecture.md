@@ -232,7 +232,7 @@ La mayoría de servicios persiste con `unless-stopped`; el cargador y
 
 - La gateway es el único API que utiliza el frontend. Nunca añadas una
   conexión MongoDB, RabbitMQ o clave del LLM al bundle del navegador.
-- Los perfiles del frontend solo generan un identificador local. No hay
+- Los perfiles del frontend usan el rango local `usr_0001`–`usr_2000`. No hay
   autenticación, autorización, sesiones verificadas ni protección contra
   suplantación; este sistema no es apto para publicar críticas en producción.
 - Las credenciales de `.env.example` no son secretos de producción.

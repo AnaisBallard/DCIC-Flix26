@@ -25,7 +25,7 @@ debe confirmar están en [docs/decisions.md](docs/decisions.md).
 | Limpieza con LLM | Normalización determinista, revisión de ratings ambiguos con OpenAI y estado durable; requiere `OPENAI_API_KEY` |
 | Recomendación TF-IDF | Índice persistente de vecinos; recomendaciones personalizadas desde las notas del perfil y películas similares |
 | Auditoría de datos | `/audit` muestra estado, métricas e historial antes/después reales |
-| Autenticación | No implementada. El selector crea perfiles locales para identificar críticas durante el desarrollo |
+| Autenticación | No implementada. El selector usa perfiles locales `usr_0001`–`usr_2000` para identificar críticas durante el desarrollo |
 
 La topología de RabbitMQ incluye colas de limpieza y el evento durable de
 catálogo listo. La disponibilidad del catálogo se publica solo después de
@@ -176,10 +176,10 @@ de usuario están en español. Las rutas implementadas son:
 | `/pelicula/{movie_id}` | Ficha, críticas, películas similares y formulario para enviar una crítica |
 | `/audit` | Estado durable del pipeline, métricas e historial antes/después |
 
-El selector de perfil guarda identificadores aleatorios en el almacenamiento
-local del navegador; no valida una identidad y no sustituye un sistema de
-autenticación. Las notas publicadas se transmiten al backend mediante la
-gateway. La lista de géneros se obtiene de una muestra paginada del catálogo;
+El selector permite elegir entre los perfiles `usr_0001`–`usr_2000` y guarda
+la selección en el almacenamiento local del navegador. No valida una identidad
+y no sustituye un sistema de autenticación. Las notas publicadas se transmiten
+al backend mediante la gateway. La lista de géneros se obtiene de una muestra paginada del catálogo;
 hasta que exista un endpoint de géneros, no se puede prometer que el selector
 incluya todas las categorías del conjunto de datos.
 

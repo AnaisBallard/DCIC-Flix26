@@ -5,66 +5,52 @@ export interface Profile {
 
 export interface ProfileState {
   profiles: Profile[];
+  userId: string;
   warning: string;
 }
 
-const storageKey = "dcic-flix-profiles";
+const storageKey = "dcic-flix-active-profile";
+const defaultProfileId = "usr_0001";
+const profileCount = 2000;
 
-function isProfile(value: unknown): value is Profile {
-  if (typeof value !== "object" || value === null) return false;
-  const profile = value as Record<string, unknown>;
-  return typeof profile.id === "string" && profile.id.length > 0
-    && typeof profile.label === "string" && profile.label.length > 0;
-}
+export const profiles: Profile[] = Array.from({ length: profileCount }, (_, index) => {
+  const id = `usr_${String(index + 1).padStart(4, "0")}`;
+  return { id, label: id };
+});
 
-function persistProfiles(profiles: Profile[]) {
+const profileIds = new Set(profiles.map((profile) => profile.id));
+
+export function saveProfileId(userId: string): string {
+  if (!profileIds.has(userId)) {
+    return "El identificador de perfil no está en la lista disponible.";
+  }
   try {
-    localStorage.setItem(storageKey, JSON.stringify(profiles));
+    localStorage.setItem(storageKey, userId);
     return "";
   } catch {
-    return "No se pudieron guardar los perfiles; estarán disponibles solo mientras esta página siga abierta.";
+    return "No se pudo guardar el perfil seleccionado; estará activo solo mientras esta página siga abierta.";
   }
-}
-
-function createDefaultProfile(warning = ""): ProfileState {
-  const profile = { id: `usr_${crypto.randomUUID()}`, label: "Mi perfil" };
-  const persistenceWarning = persistProfiles([profile]);
-  return {
-    profiles: [profile],
-    warning: [warning, persistenceWarning].filter(Boolean).join(" "),
-  };
 }
 
 export function loadProfiles(): ProfileState {
-  let saved: string | null;
   try {
-    saved = localStorage.getItem(storageKey);
+    const savedProfileId = localStorage.getItem(storageKey);
+    if (savedProfileId && profileIds.has(savedProfileId)) {
+      return { profiles, userId: savedProfileId, warning: "" };
+    }
+    if (savedProfileId) {
+      return {
+        profiles,
+        userId: defaultProfileId,
+        warning: "El perfil guardado ya no es válido; se seleccionó usr_0001.",
+      };
+    }
+    return { profiles, userId: defaultProfileId, warning: "" };
   } catch {
-    return createDefaultProfile("No se pudieron leer los perfiles guardados.");
+    return {
+      profiles,
+      userId: defaultProfileId,
+      warning: "No se pudieron leer los perfiles guardados; se seleccionó usr_0001.",
+    };
   }
-
-  if (saved) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(saved);
-    } catch {
-      return createDefaultProfile("Los perfiles guardados tenían un formato inválido; se creó uno nuevo.");
-    }
-
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isProfile)) {
-      return { profiles: parsed, warning: "" };
-    }
-    return createDefaultProfile("Los perfiles guardados tenían un formato inválido; se creó uno nuevo.");
-  }
-
-  return createDefaultProfile();
-}
-
-export function addProfile(profiles: Profile[]): ProfileState {
-  const profile = {
-    id: `usr_${crypto.randomUUID()}`,
-    label: `Perfil ${profiles.length + 1}`,
-  };
-  const next = [...profiles, profile];
-  return { profiles: next, warning: persistProfiles(next) };
 }

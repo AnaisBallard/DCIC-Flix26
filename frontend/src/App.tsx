@@ -6,17 +6,18 @@ import { AuditPage } from "./pages/AuditPage";
 import { ExplorePage } from "./pages/ExplorePage";
 import { HomePage } from "./pages/HomePage";
 import { MovieDetailPage } from "./pages/MovieDetailPage";
-import { addProfile, loadProfiles } from "./services/profiles";
+import { loadProfiles, saveProfileId } from "./services/profiles";
 
 function App() {
   const [profileState, setProfileState] = useState(loadProfiles);
-  const [userId, setUserId] = useState(() => profileState.profiles[0].id);
+  const [userId, setUserId] = useState(() => profileState.userId);
 
-  function handleAddProfile() {
-    const next = addProfile(profileState.profiles);
-    setProfileState(next);
-    setUserId(next.profiles[next.profiles.length - 1].id);
-    return Boolean(next.warning);
+  function handleUserChange(id: string) {
+    setUserId(id);
+    setProfileState((current) => ({
+      ...current,
+      warning: saveProfileId(id),
+    }));
   }
 
   return (
@@ -26,8 +27,7 @@ function App() {
         userId={userId}
         profiles={profileState.profiles}
         storageWarning={profileState.warning}
-        onUserChange={setUserId}
-        onAddProfile={handleAddProfile}
+        onUserChange={handleUserChange}
       />
       <div id="contenido">
         <Routes>

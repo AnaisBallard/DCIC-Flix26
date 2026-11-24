@@ -10,13 +10,11 @@ export function Header({
   profiles,
   storageWarning,
   onUserChange,
-  onAddProfile,
 }: {
   userId: string;
   profiles: Profile[];
   storageWarning: string;
   onUserChange: (id: string) => void;
-  onAddProfile: () => boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -72,7 +70,6 @@ export function Header({
             profiles={profiles}
             storageWarning={storageWarning}
             onChange={onUserChange}
-            onAddProfile={onAddProfile}
           />
         </div>
       </div>

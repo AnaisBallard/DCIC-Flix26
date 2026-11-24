@@ -17,7 +17,26 @@ function displayValue(value: unknown): string {
 }
 
 function formatStatus(value: string): string {
-  return value.replace(/_/g, " ");
+  return value.replace(/[_.]/g, " ");
+}
+
+function MetricList({ metrics }: { metrics?: Record<string, number> }) {
+  const entries = Object.entries(metrics ?? {}).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (entries.length === 0) {
+    return <p className="audit-metrics-empty">No se registraron cambios.</p>;
+  }
+  return (
+    <div className="audit-metrics">
+      {entries.map(([name, count]) => (
+        <div className="audit-metric" key={name}>
+          <span>{formatStatus(name)}</span>
+          <strong>{count}</strong>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function AuditPage() {
@@ -153,6 +172,12 @@ export function AuditPage() {
               ? `${latestRun.reviews_examined ?? 0} críticas examinadas. Ejecución: ${latestRun.status}.`
               : "Las métricas aparecerán tras finalizar la primera ejecución del catálogo."}
           </p>
+          {latestRun && (
+            <div className="audit-metric-breakdown">
+              <span className="audit-card-label">CAMBIOS POR CATEGORÍA</span>
+              <MetricList metrics={latestRun.metrics} />
+            </div>
+          )}
           <span className="audit-badge">
             <Database size={13} />
             {latestRun ? `${Object.values(latestRun.metrics ?? {}).reduce((sum, count) => sum + count, 0)} cambios auditados` : formatStatus(cleaningStatus)}
@@ -190,19 +215,41 @@ export function AuditPage() {
             </button>
             {selectedRun === run.run_id && (
               <div className="audit-details">
-                {detailsLoading === run.run_id ? <p className="audit-loading">Cargando cambios…</p> : (
-                  details[run.run_id]?.length
-                    ? details[run.run_id].map((detail) => (
-                      <article className="audit-detail" key={`${detail.entity_id}-${detail.category}-${detail.field}`}>
-                        <div><strong>{detail.category}</strong><small>{detail.collection} · {detail.entity_id} · {detail.method}</small></div>
-                        <p>{detail.reason}</p>
-                        <div className="audit-before-after">
-                          <span><b>Antes</b>{displayValue(detail.before)}</span>
-                          <span><b>Después</b>{displayValue(detail.after)}</span>
-                        </div>
-                      </article>
-                    ))
-                    : <p className="audit-loading">No hay cambios para mostrar.</p>
+                {detailsLoading === run.run_id ? (
+                  <p className="audit-loading">Cargando cambios…</p>
+                ) : (
+                  <>
+                    <div className="audit-run-metrics">
+                      <span className="audit-card-label">MÉTRICAS DE LA EJECUCIÓN</span>
+                      <MetricList metrics={run.metrics} />
+                    </div>
+                    {details[run.run_id]?.length
+                      ? details[run.run_id].map((detail) => (
+                        <article
+                          className="audit-detail"
+                          key={`${detail.entity_id}-${detail.category}-${detail.field}`}
+                        >
+                          <div>
+                            <strong>{formatStatus(detail.category)}</strong>
+                            <small>
+                              {detail.collection} · {detail.entity_id} · {detail.field} · {detail.method}
+                            </small>
+                          </div>
+                          <p>{detail.reason}</p>
+                          <div className="audit-before-after">
+                            <span><b>Antes</b>{displayValue(detail.before)}</span>
+                            <span><b>Después</b>{displayValue(detail.after)}</span>
+                          </div>
+                          {Object.keys(detail.evidence ?? {}).length > 0 && (
+                            <details className="audit-evidence">
+                              <summary>Evidencia</summary>
+                              <pre>{displayValue(detail.evidence)}</pre>
+                            </details>
+                          )}
+                        </article>
+                      ))
+                      : <p className="audit-loading">No hay cambios para mostrar.</p>}
+                  </>
                 )}
                 {(details[run.run_id]?.length ?? 0) < (detailTotals[run.run_id] ?? 0) && (
                   <button className="audit-load-more" disabled={detailsLoading === run.run_id} onClick={() => void loadMoreDetails(run.run_id)}>

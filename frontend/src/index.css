@@ -56,11 +56,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .profile-wrap { position: relative; }
 .profile-trigger { display: flex; min-height: 40px; align-items: center; gap: 8px; padding: 0 2px 0 0; border: 0; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; }
 .profile-avatar { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid #d5d1c6; border-radius: 50%; background: #efeadf; }
-.profile-menu { position: absolute; top: calc(100% + 13px); right: 0; z-index: 35; width: 240px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #fffefa; box-shadow: 0 16px 50px #24232120; animation: menu-in .17s ease-out; }
+.profile-menu { position: absolute; top: calc(100% + 13px); right: 0; z-index: 35; display: flex; width: 260px; max-height: min(80vh, 500px); flex-direction: column; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #fffefa; box-shadow: 0 16px 50px #24232120; animation: menu-in .17s ease-out; }
 .menu-kicker { margin: 2px 7px 8px; color: var(--muted); font-size: 10px; }
+.profile-search { display: flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); }
+.profile-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font: inherit; font-size: 10px; }
+.profile-results-count { margin: 8px 7px 4px; color: var(--muted); font-size: 9px; }
+.profile-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .profile-option { display: flex; width: 100%; min-height: 39px; align-items: center; justify-content: space-between; padding: 7px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; text-align: left; font-size: 12px; }
 .profile-option:hover { background: #f3f0e9; }
-.profile-add { justify-content: flex-start; gap: 8px; margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0; color: var(--blue); }
 .profile-storage-warning { margin: 8px 7px 2px; color: #865133; font-size: 10px; line-height: 1.5; }
 .mobile-menu-toggle { display: none; }
 
@@ -347,6 +350,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .audit-card-label { color: #656158; }
 .audit-info-card > strong { margin-top: 12px; font: 700 24px var(--display); letter-spacing: -.05em; }
 .audit-info-card > p { max-width: 450px; margin: 9px 0 16px; color: #5d594f; font-size: 11px; line-height: 1.7; }
+.audit-metric-breakdown, .audit-run-metrics { width: 100%; margin-bottom: 16px; }
+.audit-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
+.audit-metric { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; background: #ffffff80; }
+.audit-metric > span { overflow-wrap: anywhere; color: #5d594f; font-size: 9px; text-transform: capitalize; }
+.audit-metric > strong { flex: 0 0 auto; font-size: 10px; }
+.audit-metrics-empty { margin: 8px 0 0; color: var(--muted); font-size: 10px; }
 .audit-badge { display: inline-flex; align-items: center; gap: 6px; margin-top: auto; padding: 7px 9px; border: 1px solid #24232148; border-radius: 99px; font-size: 9px; }
 .audit-runs { margin-top: 18px; padding: 23px 26px; border: 1px solid #dcd8ce; background: #fffefa; }
 .audit-run { border-bottom: 1px solid #e8e5dd; }
@@ -365,6 +374,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .audit-before-after { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .audit-before-after > span { min-width: 0; padding: 9px; overflow-wrap: anywhere; background: #f3f1eb; font-size: 9px; }
 .audit-before-after b { display: block; margin-bottom: 5px; color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.audit-evidence { margin-top: 8px; color: var(--muted); font-size: 9px; }
+.audit-evidence summary { width: fit-content; cursor: pointer; }
+.audit-evidence pre { max-height: 180px; margin: 7px 0 0; padding: 9px; overflow: auto; background: #f3f1eb; color: var(--ink); font: 9px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .audit-load-more { margin-top: 12px; padding: 9px 12px; border: 1px solid #dcd8ce; background: transparent; font-size: 9px; cursor: pointer; }
 .audit-load-more:disabled { opacity: .6; cursor: wait; }
 .audit-footnote { margin-top: 20px; color: var(--muted); font-size: 10px; text-align: right; }

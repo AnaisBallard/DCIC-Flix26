@@ -16,6 +16,9 @@ consumidor, cliente, pruebas y documentación en el mismo cambio.
   contrato, no películas ni críticas que deban insertarse como datos ficticios.
 - No existe autenticación de usuario. `user_id` identifica el perfil local del
   navegador, no una identidad verificada.
+- La interfaz ofrece los perfiles `usr_0001` a `usr_2000` y conserva el
+  seleccionado en el almacenamiento local. El backend no debe tratar esos
+  identificadores como prueba de identidad.
 
 ## API pública de la gateway
 
