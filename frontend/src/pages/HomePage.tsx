@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowRight, ArrowUpRight, CirclePlay, Compass, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { getMovies } from "../services/api";
+import { getMovies, getRecommendations, getSystemStatus } from "../services/api";
 import type { Movie } from "../types";
 import { genreStyles } from "../data/genres";
 import { GenreCard, type GenreItem } from "../components/GenreCard";
@@ -16,8 +16,12 @@ function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: Re
   );
 }
 
-export function HomePage() {
+export function HomePage({ userId }: { userId: string }) {
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [recommendations, setRecommendations] = useState<Movie[]>([]);
+  const [recommendationStatus, setRecommendationStatus] = useState("waiting");
+  const [recommendationReason, setRecommendationReason] = useState("");
+  const [recommendationError, setRecommendationError] = useState("");
   const [genres, setGenres] = useState<GenreItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -45,6 +49,42 @@ export function HomePage() {
       .catch((reason: Error) => { if (active) setGenreError(reason.message); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function refreshRecommendations() {
+      try {
+        const status = await getSystemStatus();
+        if (!active) return;
+        if (!status.capabilities.recommendations) {
+          setRecommendationStatus(status.recommendations.status);
+          setRecommendations([]);
+          setRecommendationReason("");
+          setRecommendationError("");
+          return;
+        }
+        const result = await getRecommendations(userId);
+        if (!active) return;
+        setRecommendationStatus("ready");
+        setRecommendations(result.items);
+        setRecommendationReason(result.reason);
+        setRecommendationError("");
+      } catch (reason) {
+        if (!active) return;
+        setRecommendationStatus("unavailable");
+        setRecommendations([]);
+        setRecommendationError(
+          reason instanceof Error ? reason.message : "No se pudieron cargar las recomendaciones.",
+        );
+      }
+    }
+    void refreshRecommendations();
+    const interval = window.setInterval(() => { void refreshRecommendations(); }, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [userId]);
 
   const featured = useMemo(
     () => movies.find((movie) => movie.poster && movie.plot?.trim()) ?? movies.find((movie) => movie.poster) ?? movies[0],
@@ -114,8 +154,14 @@ export function HomePage() {
           <span className="recommendation-icon"><Sparkles size={20} /></span>
           <p className="eyebrow">Una selección, a tu manera</p>
           <h2>Tenemos algo<br />para <em>ti.</em></h2>
-          <p>Estamos preparando el motor que conectará tus gustos con nuevas historias. Sin recomendaciones al azar: solo sugerencias que tengan sentido.</p>
-          <span className="status-pill"><span /> Motor de recomendaciones en preparación</span>
+          <p>{recommendationStatus === "ready"
+            ? "Sugerencias calculadas a partir de las películas que has valorado en este perfil."
+            : "Estamos preparando el motor que conectará tus gustos con nuevas historias. Sin recomendaciones al azar: solo sugerencias que tengan sentido."}</p>
+          <span className="status-pill"><span /> {recommendationStatus === "ready"
+            ? "Recomendaciones disponibles"
+            : recommendationStatus === "failed" || recommendationStatus === "unavailable"
+              ? "Recomendaciones temporalmente no disponibles"
+              : "Motor de recomendaciones en preparación"}</span>
         </div>
         <div className="recommendation-art" aria-label="Ilustración editorial de DCIC Flix">
           <div className="rec-disc"><span>DCIC<br />FLIX</span></div>
@@ -124,6 +170,20 @@ export function HomePage() {
           <span className="rec-caption">NO ES EL ALGORITMO.<br />ES EL COMIENZO.</span>
         </div>
       </section>
+      {recommendationError && <p className="inline-error" role="status">{recommendationError}</p>}
+      {recommendationStatus === "ready" && recommendations.length > 0 && (
+        <section className="home-section collection-section">
+          <SectionHeading eyebrow="Elegidas para este perfil" title="Tu próxima historia" />
+          <MovieCarousel movies={recommendations} />
+        </section>
+      )}
+      {recommendationStatus === "ready" && recommendations.length === 0 && (
+        <section className="home-section collection-section">
+          <p className="empty-note">{recommendationReason === "no_rating_history"
+            ? "Valora algunas películas para recibir recomendaciones personalizadas."
+            : "Aún no encontramos películas similares que no hayas valorado."}</p>
+        </section>
+      )}
 
       <section className="editorial-section" id="sobre">
         <div className="editorial-heading">

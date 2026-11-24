@@ -123,6 +123,7 @@ services:
       MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
       RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-flix}:${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}@rabbitmq:5672/"
       RABBITMQ_CATALOG_READY_QUEUE: recommendations.catalog-ready
+      RECOMMENDER_VERSION: ${RECOMMENDER_VERSION:-1}
     networks:
       - backend
       - data

@@ -83,25 +83,40 @@ manualmente ni de que el volumen conserve la contraseña inicial.
 declarada para votos o limpieza no implementa por sí misma su API o consumer.
 Los cambios deben probarse también contra un broker que ya tenga volumen.
 
-### D-06 — TF-IDF y similitud coseno son una propuesta, no un recomendador activo
+### D-06 — Índice TF-IDF persistente y personalización con críticas del perfil
 
-**Propuesta para la siguiente etapa:** representar campos textuales seleccionados
-de las películas con TF-IDF y comparar vectores mediante similitud coseno.
+**Decisión implementada:** usar TF-IDF y similitud coseno para crear un índice
+de películas similares antes de servir recomendaciones. El texto se construye
+con título (ponderado), géneros, dirección, reparto y sinopsis. El cálculo usa
+matrices dispersas por bloques, excluye la propia película y persiste hasta 30
+vecinos por título en `_recommendation_neighbors`.
 
-**Motivo para evaluarla:** es un método de contenido relativamente simple de
-explicar: TF-IDF da más peso a términos distintivos y la similitud coseno mide
-la orientación relativa de los vectores, no su longitud. Puede servir como
-primera línea base sin afirmar que conoce preferencias personales.
+La personalización combina los vecinos de cada película que el perfil ha
+valorado: puntuaciones de 4–5 favorecen candidatos, puntuaciones de 1–2 los
+desfavorecen y 3 no expresa preferencia. El resultado excluye películas ya
+valoradas, agrega la contribución normalizada y ordena por puntuación. Sin
+historial, devuelve una lista vacía con una razón explícita; no inventa gustos
+ni resultados.
 
-**Lo que todavía debe decidir el equipo:** campos y limpieza textual, idioma,
-tratamiento de etiquetas frecuentes, umbral/número de resultados, actualización
-del corpus, evaluación offline y qué significa «personalizada» sin un historial
-de usuario autenticado. La similitud por contenido no constituye por sí sola
-una recomendación personalizada.
+El identificador del índice es un SHA-256 de `source_fingerprint`,
+`CLEANER_VERSION` y `RECOMMENDER_VERSION`. MongoDB conserva el estado activo,
+los intentos, el lease, los tiempos, el error seguro y la huella/versiones. El
+servicio solo reclama una construcción cuando el catálogo está `ready` y el
+evento `catalog.cleaning.completed` quedó confirmado. Marca el índice `ready`
+después de persistir todos los vecinos; un índice parcial se puede reanudar por
+upsert tras vencer el lease. El mismo índice listo se reutiliza después de un
+reinicio.
 
-**Estado:** no hay entrenamiento, vectorización, endpoints de recomendación ni
-resultados. No presentar esta propuesta como funcionalidad implementada ni
-mostrar puntuaciones ficticias.
+**Motivo:** esta línea base de contenido es explicable y evita recalcular el
+catálogo en cada solicitud. El perfil local hace posible combinar gustos
+positivos y negativos sin afirmar que exista autenticación.
+
+**Límites:** las rutas `/api/recommendations/{user_id}` y
+`/api/movies/{movie_id}/similar` devuelven `503` hasta que el catálogo y su
+índice estén listos. `user_id` es falsificable y no representa identidad
+verificada. Todavía hace falta evaluar calidad offline, cobertura cuando falten
+sinopsis y sesgos por idioma o metadatos incompletos. No se ha ejecutado la
+construcción sobre el volumen persistente de MongoDB.
 
 ### D-07 — Mantener la llamada LLM en el backend
 
@@ -217,8 +232,8 @@ recomendaciones.
    `event_id`; el consumidor aplica de forma idempotente el fingerprint actual.
    Así, la notificación no se pierde aunque MongoDB y RabbitMQ no compartan una
    transacción. El recomendador consume el evento idempotentemente y mantiene
-   un estado de preparación separado. Por ahora informa `indexing`: no existe
-   un índice implementado y no declara recomendaciones listas.
+   un estado de preparación separado. Construye el índice TF-IDF descrito en
+   D-06 y declara `ready` solo cuando todos los vecinos se persistieron.
 7. La gateway expone `GET /api/status`, separado del healthcheck de liveness.
    Responde `200` con el estado de negocio, incluso si una etapa está en
    `failed`; los errores se expresan como códigos seguros, no como trazas.
@@ -260,9 +275,10 @@ huella o versión invalida el resultado anterior y vuelve a `pending`.
 **Consecuencias y puntos que requieren validación:** el cargador crea o
 reconcilia un rol MongoDB limitado por colección; Compose espera al cargador y
 RabbitMQ; la cola durable y el evento están declarados. La limpieza solo se
-considera lista cuando sus cambios y auditoría se han persistido. El recomendador
-consume el evento y se queda en `indexing`, porque no existe todavía el modelo.
-Además, el cargador hace upsert de documentos, pero no elimina los documentos
+considera lista cuando sus cambios y auditoría se han persistido. El
+recomendador consume el evento, construye y persiste el índice por versión, y
+marca `ready` después de completar la escritura. La construcción en el volumen
+persistente aún no se ha ejecutado. Además, el cargador hace upsert de documentos, pero no elimina los documentos
 que ya no aparecen en un archivo fuente; ese caso debe resolverse antes de
 tratar la eliminación o sustitución de archivos como reconciliación completa.
 
@@ -297,7 +313,7 @@ Estas preguntas no se consideran resueltas por el código inicial:
    resultados para que los filtros y el selector de orden cubran todo el
    catálogo y no solo una muestra o página?
 9. ¿Qué evidencia integrada falta para validar dataset-loader, cleaning-agent y
-   el futuro índice de recommendation-service contra la rúbrica?
+   el índice de recommendation-service contra la rúbrica?
 
 ## Registro de cambios futuros
 

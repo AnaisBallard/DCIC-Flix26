@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowUpRight, CalendarDays, Clock3, MessageCircle, Star } fr
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MovieCarousel } from "../components/MovieCarousel";
-import { getMovie, getMovies, getReviews, getSystemStatus, submitReview } from "../services/api";
+import { getMovie, getReviews, getSimilarMovies, getSystemStatus, submitReview } from "../services/api";
 import type { Movie, Review } from "../types";
 
 export function MovieDetailPage({ userId }: { userId: string }) {
@@ -26,37 +26,57 @@ export function MovieDetailPage({ userId }: { userId: string }) {
     setCanSubmitReview(null);
     setRelated([]);
     setRelatedError("");
+    let movieLoaded = false;
+    let similarLoaded = false;
+    let similarLoading = false;
+    function refreshReviewStatus() {
+      getSystemStatus()
+        .then((result) => {
+          if (!active) return;
+          setCanSubmitReview(result.capabilities.reviews);
+          if (!result.capabilities.recommendations || !movieLoaded) {
+            setRelated([]);
+            setRelatedError("");
+            similarLoaded = false;
+            return;
+          }
+          if (similarLoaded || similarLoading) return;
+          similarLoading = true;
+          getSimilarMovies(movieId, 6)
+            .then((similar) => {
+              if (active) {
+                setRelated(similar.items);
+                setRelatedError("");
+                similarLoaded = true;
+              }
+            })
+            .catch((reason: Error) => {
+              if (active) {
+                setRelated([]);
+                setRelatedError(reason.message);
+              }
+            })
+            .finally(() => { similarLoading = false; });
+        })
+        .catch(() => {
+          if (active) {
+            setCanSubmitReview(false);
+            setRelated([]);
+            setRelatedError("");
+          }
+        });
+    }
     Promise.all([getMovie(movieId), getReviews(movieId)])
       .then(([detail, reviewPage]) => {
         if (!active) return;
         setMovie(detail);
         setReviews(reviewPage.items);
         setError("");
-        const genre = detail.genres?.[0];
-        if (genre) {
-          getMovies({ genre, pageSize: 8 }).then((moviePage) => {
-            if (active) {
-              setRelated(moviePage.items.filter((item) => item._id !== detail._id).slice(0, 6));
-              setRelatedError("");
-            }
-          }).catch((reason: Error) => {
-            if (active) {
-              setRelated([]);
-              setRelatedError(reason.message);
-            }
-          });
-        } else {
-          setRelated([]);
-          setRelatedError("");
-        }
+        movieLoaded = true;
+        refreshReviewStatus();
       })
       .catch((reason: Error) => { if (active) setError(reason.message); })
       .finally(() => { if (active) setLoading(false); });
-    const refreshReviewStatus = () => {
-      getSystemStatus()
-        .then((result) => { if (active) setCanSubmitReview(result.capabilities.reviews); })
-        .catch(() => { if (active) setCanSubmitReview(false); });
-    };
     refreshReviewStatus();
     const statusInterval = window.setInterval(refreshReviewStatus, 10000);
     return () => {
@@ -143,8 +163,8 @@ export function MovieDetailPage({ userId }: { userId: string }) {
         )}
       </section>
 
-      {relatedError && <p className="detail-related-error" role="status">No se pudo cargar más del mismo género: {relatedError}</p>}
-      {related.length > 0 && <section className="detail-similar"><div className="section-topline"><span>OTRAS VENTANAS</span><span>MISMO GÉNERO · {movie.genres?.[0]}</span></div><div className="section-heading"><div><p className="eyebrow">Sigue explorando</p><h2>Más historias de {movie.genres?.[0]}</h2></div><Link className="text-link" to={`/explorar?genre=${encodeURIComponent(movie.genres?.[0] ?? "")}`}>Ver género <ArrowUpRight size={16} /></Link></div><MovieCarousel movies={related} /></section>}
+      {relatedError && <p className="detail-related-error" role="status">No se pudieron cargar películas similares: {relatedError}</p>}
+      {related.length > 0 && <section className="detail-similar"><div className="section-topline"><span>OTRAS VENTANAS</span><span>POR CONTENIDO</span></div><div className="section-heading"><div><p className="eyebrow">Sigue explorando</p><h2>Películas similares</h2></div><Link className="text-link" to="/explorar">Ver catálogo <ArrowUpRight size={16} /></Link></div><MovieCarousel movies={related} /></section>}
     </main>
   );
 }

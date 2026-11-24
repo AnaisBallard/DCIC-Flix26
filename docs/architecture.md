@@ -17,7 +17,7 @@ flowchart LR
     Gateway -->|estado| Recommendation[Servicio de recomendaciones]
     Gateway -.->|health| Consumer[Consumer]
     Catalog -->|lectura| Mongo[(MongoDB)]
-    Recommendation -->|lectura de estado| Mongo
+    Recommendation -->|películas/críticas, estado e índice| Mongo
     Interaction -->|evento persistente| Broker[RabbitMQ]
     Broker -->|cola de críticas| Consumer
     Consumer -->|lectura/escritura| Mongo
@@ -31,9 +31,10 @@ flowchart LR
 
 Las líneas discontinuas indican una comprobación de salud. El agente de
 limpieza aplica normalizaciones deterministas, registra cada cambio y usa
-OpenAI únicamente para ratings ausentes o inválidos con comentario útil. El
-recomendador consume el evento de catálogo listo, pero todavía no crea un
-índice ni sirve resultados.
+OpenAI únicamente para ratings ausentes o inválidos con comentario útil. Tras
+el evento confirmado de catálogo listo, el recomendador construye un índice
+TF-IDF/coseno versionado y sirve recomendaciones personalizadas y películas
+similares desde sus datos precalculados.
 
 ## 2. Servicios y propiedad de los datos
 
@@ -46,7 +47,7 @@ recomendador consume el evento de catálogo listo, pero todavía no crea un
 | `consumer` | Valida mensajes de crítica y los persiste de manera idempotente | MongoDB de lectura/escritura y RabbitMQ |
 | `dataset-loader` | Carga archivos admitidos y reconcilia cuentas e índices | Cuenta administrativa de MongoDB; trabajo de inicialización |
 | `cleaning-agent` | Pipeline de limpieza, auditoría durable, estado y publicación de catálogo listo | Escritura limitada a películas, críticas y colecciones de pipeline/auditoría; OpenAI por entorno |
-| `recommendation-service` | Consume el evento de catálogo listo y expone su estado | No hay índice ni API de recomendaciones; nunca indica `ready` sin motor |
+| `recommendation-service` | Construye y persiste vecinos TF-IDF/coseno, agrega preferencias del perfil y expone recomendaciones y películas similares | Lectura de películas/críticas; escritura limitada a estado e índice; RabbitMQ |
 | `mongodb` | Almacén persistente del catálogo y las críticas | Solo red `data` |
 | `rabbitmq` | Broker, exchange, colas, bindings y colas de mensajes fallidos | Solo red `messaging` |
 
@@ -137,7 +138,8 @@ persistente y `dataset/mongo-init.sh` montado en
 vez un volumen vacío. El script crea:
 
 - una cuenta de lectura para el catálogo;
-- una cuenta de lectura para el servicio de recomendaciones;
+- una cuenta que lee el catálogo y las críticas, y solo escribe el estado y los
+  documentos de índice del servicio de recomendaciones;
 - una cuenta de lectura y escritura para el consumer;
 - un rol limitado para `cleaning-agent`, definido por colección;
 - índices de catálogo y críticas.
@@ -186,9 +188,12 @@ gateway permite crear críticas solo cuando la limpieza está `ready`.
 El estado pasa a `ready` solo después de persistir datos e informe. Un evento
 persistente y confirmado `catalog.cleaning.completed` se publica a
 `recommendations.catalog-ready`; si MongoDB no registra el envío, el mismo
-`event_id` se vuelve a publicar. El recomendador restaura el estado del catálogo
-tras reiniciarse y marca `indexing`, pero continúa `recommendations_available:
-false` mientras no haya un índice implementado.
+`event_id` se vuelve a publicar. El recomendador comprueba el evento y el estado
+durable, crea vecinos TF-IDF/coseno y solo marca `ready` tras persistir el lote
+completo. El identificador del índice incluye la huella y las versiones de
+limpieza y recomendación; un reinicio reutiliza el índice vigente. El servicio
+expone recomendaciones por perfil y películas similares sin recalcular el
+catálogo en cada petición.
 
 ## 7. RabbitMQ y topología
 
@@ -218,7 +223,8 @@ implementada toda la lógica de negocio: un estado `ok` significa que el proceso
 está disponible, no que la limpieza o las recomendaciones ya funcionen.
 
 `depends_on` con condiciones de salud o de finalización fija el orden inicial;
-el lease, el estado persistente y los reintentos cubren el pipeline de limpieza.
+el lease, el estado persistente y los reintentos cubren los pipelines de
+limpieza e indexación.
 La mayoría de servicios persiste con `unless-stopped`; el cargador y
 `rabbitmq-init` son tareas puntuales.
 
@@ -234,9 +240,10 @@ La mayoría de servicios persiste con `unless-stopped`; el cargador y
   de interacción no obtiene permisos de escritura en MongoDB.
 - La red no sustituye TLS, rotación de claves, límites de tasa ni un análisis
   de las imágenes y dependencias.
-- El endpoint de salud de recomendaciones no demuestra que exista un motor.
-  Su estado de negocio permanece en `waiting` o `indexing`; el algoritmo y sus
-  resultados siguen pendientes.
+- El endpoint de salud de recomendaciones no demuestra que el índice esté
+  listo. El estado de negocio se consulta en `/api/status`; las rutas de
+  recomendaciones devuelven `503` hasta que la huella y las versiones activas
+  coincidan con el catálogo listo.
 
 ## 10. Cómo comprobar y desarrollar cambios
 
@@ -262,7 +269,7 @@ Desde la raíz, con Python 3.13:
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r gateway\requirements-dev.txt -r catalog-service\requirements-dev.txt -r interaction-service\requirements-dev.txt -r consumer\requirements-dev.txt
+python -m pip install -r gateway\requirements-dev.txt -r catalog-service\requirements-dev.txt -r interaction-service\requirements-dev.txt -r consumer\requirements-dev.txt -r recommendation-service\requirements.txt
 python -m pytest -q
 ```
 

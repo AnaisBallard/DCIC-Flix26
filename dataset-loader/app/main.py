@@ -57,9 +57,44 @@ def ensure_database_access(client: MongoClient, database_name: str) -> None:
             roles=[],
         )
 
+    recommendation_role = "recommendationEngine"
+    recommendation_privileges = [
+        {
+            "resource": {
+                "db": database_name,
+                "collection": "_recommendation_index_state",
+            },
+            "actions": ["find", "insert", "update", "remove", "findAndModify"],
+        },
+        {
+            "resource": {
+                "db": database_name,
+                "collection": "_recommendation_neighbors",
+            },
+            "actions": ["find", "insert", "update", "remove"],
+        },
+    ]
+    inherited_read_role = [{"role": "read", "db": database_name}]
+    try:
+        database.command(
+            "updateRole",
+            recommendation_role,
+            privileges=recommendation_privileges,
+            roles=inherited_read_role,
+        )
+    except OperationFailure as error:
+        if error.code != 11:
+            raise
+        database.command(
+            "createRole",
+            recommendation_role,
+            privileges=recommendation_privileges,
+            roles=inherited_read_role,
+        )
+
     for suffix, role in (
         ("CATALOG", "read"),
-        ("RECOMMENDATION", "read"),
+        ("RECOMMENDATION", recommendation_role),
         ("CONSUMER", "readWrite"),
         ("CLEANER", cleaner_role),
     ):
@@ -75,6 +110,20 @@ def ensure_database_access(client: MongoClient, database_name: str) -> None:
     database["_cleaning_audit_runs"].create_index([("started_at", -1)])
     database["_cleaning_audit_details"].create_index(
         [("run_id", 1), ("updated_at", 1)]
+    )
+    database["_recommendation_index_state"].update_one(
+        {"_id": "active"},
+        {
+            "$setOnInsert": {
+                "index_status": "waiting",
+                "attempt": 0,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+        upsert=True,
+    )
+    database["_recommendation_neighbors"].create_index(
+        [("index_id", 1), ("source_movie_id", 1)]
     )
 
 

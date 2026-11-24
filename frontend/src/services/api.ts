@@ -103,6 +103,13 @@ export interface AuditDetail {
   updated_at: string;
 }
 
+export interface RecommendationResult {
+  items: Array<Movie & { recommendation_score: number }>;
+  total: number;
+  reason: string;
+  source_movie_id?: string;
+}
+
 export function getMovies(query: MovieQuery = {}) {
   const params = new URLSearchParams();
   if (query.q?.trim()) params.set("q", query.q.trim());
@@ -138,6 +145,20 @@ export function getHealth() {
 
 export function getSystemStatus() {
   return request<SystemStatus>("/api/status");
+}
+
+export function getRecommendations(userId: string, limit = 12) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<RecommendationResult>(
+    `/api/recommendations/${encodeURIComponent(userId)}?${params}`,
+  );
+}
+
+export function getSimilarMovies(movieId: string, limit = 12) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<RecommendationResult>(
+    `/api/movies/${encodeURIComponent(movieId)}/similar?${params}`,
+  );
 }
 
 export function getAuditRuns(limit = 20, offset = 0) {

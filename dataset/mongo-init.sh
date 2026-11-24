@@ -26,10 +26,18 @@ target.createUser({
   pwd: decode("$catalog_password"),
   roles: [{ role: "read", db: databaseName }]
 });
+target.createRole({
+  role: "recommendationEngine",
+  privileges: [
+    { resource: { db: databaseName, collection: "_recommendation_index_state" }, actions: ["find", "insert", "update", "remove", "findAndModify"] },
+    { resource: { db: databaseName, collection: "_recommendation_neighbors" }, actions: ["find", "insert", "update", "remove"] }
+  ],
+  roles: [{ role: "read", db: databaseName }]
+});
 target.createUser({
   user: decode("$recommendation_user"),
   pwd: decode("$recommendation_password"),
-  roles: [{ role: "read", db: databaseName }]
+  roles: [{ role: "recommendationEngine", db: databaseName }]
 });
 target.createUser({
   user: decode("$consumer_user"),
@@ -58,6 +66,12 @@ target.movies.createIndex({ year: 1 });
 target.reviews.createIndex({ movie_id: 1 });
 target.reviews.createIndex({ user_id: 1 });
 target.reviews.createIndex({ movie_id: 1, user_id: 1 });
+target["_recommendation_index_state"].updateOne(
+  { _id: "active" },
+  { $setOnInsert: { index_status: "waiting", attempt: 0, updated_at: new Date() } },
+  { upsert: true }
+);
+target["_recommendation_neighbors"].createIndex({ index_id: 1, source_movie_id: 1 });
 EOF
 
 mongosh --quiet \

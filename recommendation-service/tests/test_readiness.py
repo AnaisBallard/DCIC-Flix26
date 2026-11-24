@@ -1,29 +1,49 @@
 import hashlib
-import importlib.util
-from pathlib import Path
 
-import pytest
-
-main_path = Path(__file__).resolve().parents[1] / "app" / "main.py"
-spec = importlib.util.spec_from_file_location("dcic_recommendation_readiness", main_path)
-recommendation_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(recommendation_module)
+from dcic_recommendation_app import main as recommendation_module
 
 
-@pytest.mark.asyncio
-async def test_catalog_event_moves_service_to_indexing_not_ready():
-    readiness = recommendation_module.RecommendationReadiness()
-    recommendation_module.app.state.readiness = readiness
+def test_recommendations_wait_for_catalog_ready_event_and_matching_index():
+    fingerprint = "a" * 64
+    cleaner_version = "1"
+    catalog = {
+        "cleaning_status": "ready",
+        "ready_event_status": "sent",
+        "source_fingerprint": fingerprint,
+        "cleaner_version": cleaner_version,
+    }
 
-    waiting = await recommendation_module.status()
-    assert waiting["status"] == "waiting"
+    waiting = recommendation_module.recommendation_status(catalog, None)
+    assert waiting["status"] == "indexing"
     assert waiting["recommendations_available"] is False
 
-    readiness.catalog_ready_event("a" * 64)
-    indexing = await recommendation_module.status()
-    assert indexing["status"] == "indexing"
-    assert indexing["source_fingerprint"] == "a" * 64
-    assert indexing["recommendations_available"] is False
+    index_id = recommendation_module.make_index_id(fingerprint, cleaner_version)
+    ready = recommendation_module.recommendation_status(
+        catalog,
+        {
+            "active_index_id": index_id,
+            "source_fingerprint": fingerprint,
+            "cleaner_version": cleaner_version,
+            "index_version": recommendation_module.INDEX_VERSION,
+            "index_status": "ready",
+        },
+    )
+    assert ready["status"] == "ready"
+    assert ready["recommendations_available"] is True
+
+
+def test_recommendations_wait_until_catalog_ready_event_is_confirmed():
+    state = {
+        "cleaning_status": "ready",
+        "ready_event_status": "pending",
+        "source_fingerprint": "a" * 64,
+        "cleaner_version": "1",
+    }
+
+    status = recommendation_module.recommendation_status(state, None)
+
+    assert status["status"] == "waiting"
+    assert status["recommendations_available"] is False
 
 
 def test_catalog_ready_event_requires_matching_deterministic_id():

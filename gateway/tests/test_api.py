@@ -67,6 +67,25 @@ async def test_invalid_movie_id_is_rejected_before_forwarding():
 
 
 @pytest.mark.asyncio
+async def test_recommendation_routes_are_forwarded_to_recommendation_service():
+    similar = await request_with_upstream(
+        "GET", f"/api/movies/{MOVIE_ID}/similar", params={"limit": 6}
+    )
+    personalized = await request_with_upstream(
+        "GET", "/api/recommendations/usr_profile-1", params={"limit": 8}
+    )
+
+    assert similar.status_code == 200
+    assert personalized.status_code == 200
+    similar_url = similar.json()["url"]
+    personalized_url = personalized.json()["url"]
+    assert "recommendation-service" in similar_url
+    assert f"/movies/{MOVIE_ID}/similar?limit=6" in similar_url
+    assert "recommendation-service" in personalized_url
+    assert "/recommendations/usr_profile-1?limit=8" in personalized_url
+
+
+@pytest.mark.asyncio
 async def test_invalid_rating_is_rejected_before_forwarding():
     response = await request_with_upstream(
         "POST",

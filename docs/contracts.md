@@ -33,7 +33,9 @@ al catálogo, RabbitMQ ni MongoDB. La gateway permite, por defecto, el origen
 | `GET /api/audit/runs/{run_id}/details` | Cambios antes/después paginados | Cleaning-agent |
 | `GET /api/movies` | Buscar, filtrar y paginar películas | Catálogo |
 | `GET /api/movies/{movie_id}` | Obtener la ficha de una película | Catálogo |
+| `GET /api/movies/{movie_id}/similar` | Obtener películas similares precalculadas | Recomendador |
 | `GET /api/movies/{movie_id}/reviews` | Leer críticas existentes | Catálogo |
+| `GET /api/recommendations/{user_id}` | Obtener recomendaciones personalizadas del perfil | Recomendador |
 | `POST /api/interactions/reviews` | Publicar una crítica si el catálogo está listo | Cleaning-agent e interaction-service |
 
 `GET /health` comprueba la disponibilidad local de la gateway. No garantiza por
@@ -46,8 +48,8 @@ no ofrece recomendaciones.
 `GET /api/status` devuelve `200` con el estado de negocio aunque la limpieza
 esté `pending`, `running` o `failed`. La gateway activa la capacidad de publicar
 críticas solo cuando `catalog.cleaning_status` es `ready`. Las recomendaciones
-solo serían activas si el recomendador declara `ready`; el código actual se
-queda en `waiting` o `indexing` y no ofrece resultados.
+solo están disponibles cuando la huella y la versión del índice coinciden con
+el catálogo listo.
 
 Ejemplo de forma (los valores no describen una ejecución real):
 
@@ -61,9 +63,11 @@ Ejemplo de forma (los valores no describen una ejecución real):
     "error_code": null
   },
   "recommendations": {
-    "status": "waiting",
-    "source_fingerprint": null,
-    "recommendations_available": false
+    "status": "indexing",
+    "source_fingerprint": "64 caracteres hexadecimales",
+    "recommendations_available": false,
+    "error_code": null,
+    "updated_at": null
   },
   "capabilities": {
     "browse": true,
@@ -72,6 +76,40 @@ Ejemplo de forma (los valores no describen una ejecución real):
   }
 }
 ```
+
+### Recomendaciones personalizadas
+
+```http
+GET /api/recommendations/usr_identificador_local?limit=12
+```
+
+`user_id` es el identificador local del perfil, no una identidad autenticada.
+`limit` es un entero entre 1 y 30 y su valor predeterminado es 12. La respuesta
+`200 OK` incluye películas del catálogo con `recommendation_score`, `total` y
+un `reason`. Solo se usan las críticas de ese perfil; las películas ya valoradas
+se excluyen. Sin historial válido devuelve una lista vacía con
+`reason: "no_rating_history"`. Si el catálogo o el índice correspondiente aún
+no están listos, responde `503 Service Unavailable`, sin resultados parciales.
+
+### Películas similares
+
+```http
+GET /api/movies/573a13a4f29313caabd10527/similar?limit=12
+```
+
+`movie_id` debe ser un ObjectId válido y existente; `limit` usa el mismo rango
+que en recomendaciones personalizadas. La respuesta incluye películas vecinas
+precálculadas en el índice y su `recommendation_score`. Un origen inexistente
+responde `404`; un índice no disponible responde `503`. Si no hay vecinos con
+contenido en común, devuelve `items: []` y `reason: "no_similar_movies"`.
+
+El índice TF-IDF usa título, géneros, dirección, reparto y sinopsis, y guarda
+hasta 30 vecinos por película bajo `_recommendation_neighbors`. El identificador
+del índice combina la huella del catálogo, `CLEANER_VERSION` y
+`RECOMMENDER_VERSION`. El recomendador persiste primero todos los vecinos y
+solo entonces marca su estado durable como `ready`; los procesos reiniciados
+reutilizan el índice vigente. El registro técnico y sus límites están en
+[decisions.md](decisions.md), decisión D-06.
 
 Al llamar a un servicio interno, la gateway conserva la respuesta HTTP del
 servicio. Un fallo de conexión upstream se traduce a `503 Service Unavailable`;

@@ -31,7 +31,7 @@ function App() {
       />
       <div id="contenido">
         <Routes>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<HomePage userId={userId} />} />
           <Route path="/explorar" element={<ExplorePage />} />
           <Route path="/pelicula/:movieId" element={<MovieDetailPage userId={userId} />} />
           <Route path="/audit" element={<AuditPage />} />

@@ -265,6 +265,34 @@ async def movie_details(
     return await forward(client, "catalog", f"/movies/{movie_id}")
 
 
+@app.get("/api/movies/{movie_id}/similar")
+async def similar_movies(
+    movie_id: MovieId,
+    client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
+    limit: Annotated[int, Query(ge=1, le=30)] = 12,
+) -> Response:
+    return await forward(
+        client,
+        "recommendation",
+        f"/movies/{movie_id}/similar",
+        params={"limit": limit},
+    )
+
+
+@app.get("/api/recommendations/{user_id}")
+async def personalized_recommendations(
+    user_id: Annotated[str, Path(min_length=1, max_length=128)],
+    client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
+    limit: Annotated[int, Query(ge=1, le=30)] = 12,
+) -> Response:
+    return await forward(
+        client,
+        "recommendation",
+        f"/recommendations/{user_id}",
+        params={"limit": limit},
+    )
+
+
 @app.get("/api/movies/{movie_id}/reviews")
 async def movie_reviews(
     movie_id: MovieId,

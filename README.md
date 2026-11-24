@@ -3,8 +3,9 @@
 Plataforma universitaria para descubrir películas. El repositorio reúne una
 interfaz React, una gateway HTTP, servicios FastAPI, MongoDB, RabbitMQ y
 contenedores Docker. El catálogo, las fichas y las críticas están conectados;
-el agente de limpieza ya registra las correcciones y el recomendador todavía
-no genera resultados.
+el agente de limpieza registra las correcciones y el recomendador precalcula
+películas similares y recomendaciones personalizadas cuando el catálogo está
+listo.
 
 Esta guía explica cómo ejecutar el proyecto, qué hace cada parte y cómo verificar
 los resultados. La arquitectura y los contratos se describen con más detalle en
@@ -22,14 +23,14 @@ debe confirmar están en [docs/decisions.md](docs/decisions.md).
 | Consumer | Validación, escritura idempotente en MongoDB y confirmación del mensaje |
 | Carga del dataset | Importación de los archivos `.json` y `.json.gz` admitidos |
 | Limpieza con LLM | Normalización determinista, revisión de ratings ambiguos con OpenAI y estado durable; requiere `OPENAI_API_KEY` |
-| Recomendación TF-IDF | Espera el evento de catálogo listo; aún no hay índice, algoritmo ni resultados |
+| Recomendación TF-IDF | Índice persistente de vecinos; recomendaciones personalizadas desde las notas del perfil y películas similares |
 | Auditoría de datos | `/audit` muestra estado, métricas e historial antes/después reales |
 | Autenticación | No implementada. El selector crea perfiles locales para identificar críticas durante el desarrollo |
 
 La topología de RabbitMQ incluye colas de limpieza y el evento durable de
 catálogo listo. La disponibilidad del catálogo se publica solo después de
-persistir la limpieza y su auditoría; las recomendaciones siguen indisponibles
-hasta que exista un índice real. La interfaz no inventa películas,
+persistir la limpieza y su auditoría; el índice se habilita después de guardar
+todos sus vecinos. La interfaz no inventa películas,
 recomendaciones, críticas ni resultados de limpieza.
 
 ## Requisitos
@@ -112,6 +113,8 @@ las variables, los valores de desarrollo y su finalidad:
   encuentra casos que requieren inferencia.
 - `CLEANER_VERSION`: versión de reglas; al cambiarla, el cargador reimporta el
   origen antes de limpiar de nuevo.
+- `RECOMMENDER_VERSION`: versión del algoritmo/representación; cambiarla
+  programa un índice nuevo después de que el catálogo esté listo.
 
 Los valores de ejemplo son **solo para desarrollo local**; cámbialos antes de
 compartir un entorno. No guardes `.env`, contraseñas ni claves en Git. La clave
@@ -146,7 +149,8 @@ pipeline en `pending` cuando cambia el dataset o `CLEANER_VERSION`. El agente
 registra cambios y métricas en MongoDB, reanuda mediante lease y solo emite
 `catalog.cleaning.completed` después de terminar correctamente. Las críticas
 nuevas se rechazan temporalmente hasta `ready`; las recomendaciones permanecen
-`waiting`/`indexing` porque el modelo todavía no existe. No ejecutes una
+`waiting`/`indexing` hasta que se complete el índice asociado a la huella y las
+versiones activas. No ejecutes una
 limpieza masiva sobre un volumen que contenga datos importantes sin copia de
 seguridad y validación del equipo.
 
@@ -167,9 +171,9 @@ de usuario están en español. Las rutas implementadas son:
 
 | Ruta | Uso |
 | --- | --- |
-| `/` | Portada editorial y selección del catálogo disponible |
+| `/` | Portada editorial, selección del catálogo y recomendaciones del perfil |
 | `/explorar` | Búsqueda por título o argumento, género, orden de la página visible y paginación |
-| `/pelicula/{movie_id}` | Ficha, críticas y formulario para enviar una crítica |
+| `/pelicula/{movie_id}` | Ficha, críticas, películas similares y formulario para enviar una crítica |
 | `/audit` | Estado durable del pipeline, métricas e historial antes/después |
 
 El selector de perfil guarda identificadores aleatorios en el almacenamiento
@@ -213,7 +217,9 @@ actuales son:
 | `GET /api/health` | Estado agregado de los servicios consultados |
 | `GET /api/movies?q=&genre=&page=1&page_size=20` | Buscar, filtrar y paginar películas |
 | `GET /api/movies/{movie_id}` | Consultar la ficha de una película |
+| `GET /api/movies/{movie_id}/similar?limit=12` | Consultar películas similares precalculadas |
 | `GET /api/movies/{movie_id}/reviews?page=1&page_size=20` | Leer críticas existentes |
+| `GET /api/recommendations/{user_id}?limit=12` | Obtener recomendaciones personalizadas del perfil |
 | `POST /api/interactions/reviews` | Publicar una nota y una crítica |
 
 Los contratos de parámetros, validación, respuestas, evento y errores se
@@ -248,7 +254,7 @@ desarrollo de los servicios con pruebas:
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r gateway\requirements-dev.txt -r catalog-service\requirements-dev.txt -r interaction-service\requirements-dev.txt -r consumer\requirements-dev.txt
+python -m pip install -r gateway\requirements-dev.txt -r catalog-service\requirements-dev.txt -r interaction-service\requirements-dev.txt -r consumer\requirements-dev.txt -r recommendation-service\requirements.txt
 python -m pytest -q
 ```
 
@@ -290,7 +296,7 @@ estas pruebas son importantes y cuáles son las redes esperadas.
 | `interaction-service/` | Validación y publicación de interacciones en RabbitMQ |
 | `consumer/` | Validación de eventos y persistencia idempotente de críticas |
 | `cleaning-agent/` | Esqueleto para limpieza asistida por LLM; lógica todavía pendiente |
-| `recommendation-service/` | Esqueleto de recomendaciones; TF-IDF todavía pendiente |
+| `recommendation-service/` | Índice TF-IDF/coseno persistente y API de recomendaciones |
 | `dataset-loader/` | Importación del dataset, cuentas e índices |
 | `dataset/` | Archivos fuente, inicialización de MongoDB y perfilador de solo lectura |
 | `rabbitmq/` | Configuración del broker, topología y sincronización de credenciales |
