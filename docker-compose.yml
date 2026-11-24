@@ -26,6 +26,7 @@ services:
       RECOMMENDATION_SERVICE_URL: http://recommendation-service:8000
       INTERACTION_SERVICE_URL: http://interaction-service:8000
       CONSUMER_SERVICE_URL: http://consumer:8000
+      CLEANING_AGENT_URL: http://cleaning-agent:8000
     ports:
       - "8000:8000"
     networks:
@@ -40,6 +41,8 @@ services:
       interaction-service:
         condition: service_healthy
       consumer:
+        condition: service_healthy
+      cleaning-agent:
         condition: service_healthy
     healthcheck:
       test:
@@ -83,14 +86,20 @@ services:
       context: ./cleaning-agent
     environment:
       SERVICE_NAME: cleaning-agent
+      MONGODB_URI: "mongodb://${MONGODB_CLEANER_USER:-flix_cleaner}:${MONGODB_CLEANER_PASSWORD:-cleaner_local_dev}@mongodb:27017/${MONGODB_DATABASE:-peliculas-proyectos}?authSource=${MONGODB_DATABASE:-peliculas-proyectos}"
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      CLEANER_VERSION: ${CLEANER_VERSION:-1}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-flix}:${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}@rabbitmq:5672/"
-      RABBITMQ_CLEANING_QUEUE: catalog.cleaning
     networks:
+      - backend
+      - data
       - messaging
       - llm_egress
     depends_on:
+      dataset-loader:
+        condition: service_completed_successfully
       rabbitmq-init:
         condition: service_completed_successfully
     healthcheck:
@@ -112,11 +121,16 @@ services:
       SERVICE_NAME: recommendation-service
       MONGODB_URI: "mongodb://${MONGODB_RECOMMENDATION_USER:-flix_recommendation}:${MONGODB_RECOMMENDATION_PASSWORD:-recommendation_local_dev}@mongodb:27017/${MONGODB_DATABASE:-peliculas-proyectos}?authSource=${MONGODB_DATABASE:-peliculas-proyectos}"
       MONGODB_DATABASE: ${MONGODB_DATABASE:-peliculas-proyectos}
+      RABBITMQ_URL: "amqp://${RABBITMQ_DEFAULT_USER:-flix}:${RABBITMQ_DEFAULT_PASS:-flix_local_dev_only}@rabbitmq:5672/"
+      RABBITMQ_CATALOG_READY_QUEUE: recommendations.catalog-ready
     networks:
       - backend
       - data
+      - messaging
     depends_on:
       dataset-loader:
+        condition: service_completed_successfully
+      rabbitmq-init:
         condition: service_completed_successfully
     healthcheck:
       test:
@@ -200,7 +214,10 @@ services:
       MONGODB_RECOMMENDATION_PASSWORD: ${MONGODB_RECOMMENDATION_PASSWORD:-recommendation_local_dev}
       MONGODB_CONSUMER_USER: ${MONGODB_CONSUMER_USER:-flix_consumer}
       MONGODB_CONSUMER_PASSWORD: ${MONGODB_CONSUMER_PASSWORD:-consumer_local_dev}
+      MONGODB_CLEANER_USER: ${MONGODB_CLEANER_USER:-flix_cleaner}
+      MONGODB_CLEANER_PASSWORD: ${MONGODB_CLEANER_PASSWORD:-cleaner_local_dev}
       DATASET_DIRECTORY: /dataset
+      CLEANER_VERSION: ${CLEANER_VERSION:-1}
     volumes:
       - ./dataset:/dataset:ro
     networks:
@@ -223,6 +240,8 @@ services:
       MONGODB_RECOMMENDATION_PASSWORD: ${MONGODB_RECOMMENDATION_PASSWORD:-recommendation_local_dev}
       MONGODB_CONSUMER_USER: ${MONGODB_CONSUMER_USER:-flix_consumer}
       MONGODB_CONSUMER_PASSWORD: ${MONGODB_CONSUMER_PASSWORD:-consumer_local_dev}
+      MONGODB_CLEANER_USER: ${MONGODB_CLEANER_USER:-flix_cleaner}
+      MONGODB_CLEANER_PASSWORD: ${MONGODB_CLEANER_PASSWORD:-cleaner_local_dev}
     volumes:
       - mongo_data:/data/db
       - ./dataset/mongo-init.sh:/docker-entrypoint-initdb.d/10-mongo-init.sh:ro

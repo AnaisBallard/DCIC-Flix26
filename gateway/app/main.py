@@ -14,14 +14,17 @@ SERVICE_URLS = {
     "interaction": "INTERACTION_SERVICE_URL",
     "recommendation": "RECOMMENDATION_SERVICE_URL",
     "consumer": "CONSUMER_SERVICE_URL",
+    "cleaning": "CLEANING_AGENT_URL",
 }
 DEFAULT_SERVICE_URLS = {
     "catalog": "http://catalog-service:8000",
     "interaction": "http://interaction-service:8000",
     "recommendation": "http://recommendation-service:8000",
     "consumer": "http://consumer:8000",
+    "cleaning": "http://cleaning-agent:8000",
 }
 OBJECT_ID_PATTERN = r"^[a-fA-F0-9]{24}$"
+RUN_ID_PATTERN = r"^[a-f0-9]{64}$"
 MovieId = Annotated[str, Path(pattern=OBJECT_ID_PATTERN)]
 
 
@@ -88,6 +91,10 @@ async def forward(
         raise HTTPException(
             status_code=503, detail=f"{service} service is unavailable"
         ) from error
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=503, detail=f"{service} service returned an error"
+        ) from error
 
     content_type = upstream.headers.get("content-type", "application/json")
     return Response(
@@ -95,6 +102,36 @@ async def forward(
         status_code=upstream.status_code,
         headers={"content-type": content_type},
     )
+
+
+async def service_payload(
+    client: httpx.AsyncClient, service: str, path: str
+) -> dict[str, Any]:
+    try:
+        response = await client.get(f"{service_url(service)}{path}")
+        response.raise_for_status()
+        payload = response.json()
+    except httpx.TimeoutException as error:
+        raise HTTPException(
+            status_code=504, detail=f"{service} service timed out"
+        ) from error
+    except httpx.RequestError as error:
+        raise HTTPException(
+            status_code=503, detail=f"{service} service is unavailable"
+        ) from error
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(
+            status_code=503, detail=f"{service} service returned an error"
+        ) from error
+    except ValueError as error:
+        raise HTTPException(
+            status_code=502, detail=f"{service} service returned invalid JSON"
+        ) from error
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=502, detail=f"{service} service returned an invalid response"
+        )
+    return payload
 
 
 @app.get("/health")
@@ -127,6 +164,80 @@ async def system_health(
             "status": "ok" if healthy else "degraded",
             "services": checks,
         },
+    )
+
+
+@app.get("/api/status")
+async def system_status(
+    client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
+) -> dict[str, Any]:
+    async def read_status(service: str, path: str) -> dict[str, Any]:
+        try:
+            return await service_payload(client, service, path)
+        except HTTPException:
+            if service == "cleaning":
+                return {
+                    "cleaning_status": "failed",
+                    "source_fingerprint": None,
+                    "cleaner_version": None,
+                    "updated_at": None,
+                    "error_code": "status_unavailable",
+                }
+            return {
+                "status": "failed",
+                "source_fingerprint": None,
+                "recommendations_available": False,
+            }
+
+    catalog, recommendations = await asyncio.gather(
+        read_status("cleaning", "/status"),
+        read_status("recommendation", "/status"),
+    )
+    cleaning_status = catalog.get("cleaning_status", "failed")
+    recommendation_status = recommendations.get("status", "failed")
+    catalog_ready = cleaning_status == "ready"
+    recommendations_ready = (
+        catalog_ready
+        and recommendation_status == "ready"
+        and recommendations.get("recommendations_available") is True
+    )
+    return {
+        "catalog": catalog,
+        "recommendations": recommendations,
+        "capabilities": {
+            "browse": True,
+            "reviews": catalog_ready,
+            "recommendations": recommendations_ready,
+        },
+    }
+
+
+@app.get("/api/audit/runs")
+async def audit_runs(
+    client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> Response:
+    return await forward(
+        client,
+        "cleaning",
+        "/audit/runs",
+        params={"limit": limit, "offset": offset},
+    )
+
+
+@app.get("/api/audit/runs/{run_id}/details")
+async def audit_run_details(
+    run_id: Annotated[str, Path(pattern=RUN_ID_PATTERN)],
+    client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> Response:
+    return await forward(
+        client,
+        "cleaning",
+        f"/audit/runs/{run_id}/details",
+        params={"limit": limit, "offset": offset},
     )
 
 
@@ -174,6 +285,12 @@ async def create_review(
     review: ReviewInput,
     client: Annotated[httpx.AsyncClient, Depends(get_http_client)],
 ) -> Response:
+    catalog_status = await service_payload(client, "cleaning", "/status")
+    if catalog_status.get("cleaning_status") != "ready":
+        raise HTTPException(
+            status_code=503,
+            detail="Reviews are unavailable until catalog cleaning is ready",
+        )
     return await forward(
         client,
         "interaction",

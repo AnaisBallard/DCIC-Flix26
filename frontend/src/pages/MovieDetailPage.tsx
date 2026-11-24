@@ -2,7 +2,7 @@ import { ArrowLeft, ArrowUpRight, CalendarDays, Clock3, MessageCircle, Star } fr
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { MovieCarousel } from "../components/MovieCarousel";
-import { getMovie, getMovies, getReviews, submitReview } from "../services/api";
+import { getMovie, getMovies, getReviews, getSystemStatus, submitReview } from "../services/api";
 import type { Movie, Review } from "../types";
 
 export function MovieDetailPage({ userId }: { userId: string }) {
@@ -18,10 +18,12 @@ export function MovieDetailPage({ userId }: { userId: string }) {
   const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
+  const [canSubmitReview, setCanSubmitReview] = useState<boolean | null>(null);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setCanSubmitReview(null);
     setRelated([]);
     setRelatedError("");
     Promise.all([getMovie(movieId), getReviews(movieId)])
@@ -50,7 +52,17 @@ export function MovieDetailPage({ userId }: { userId: string }) {
       })
       .catch((reason: Error) => { if (active) setError(reason.message); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    const refreshReviewStatus = () => {
+      getSystemStatus()
+        .then((result) => { if (active) setCanSubmitReview(result.capabilities.reviews); })
+        .catch(() => { if (active) setCanSubmitReview(false); });
+    };
+    refreshReviewStatus();
+    const statusInterval = window.setInterval(refreshReviewStatus, 10000);
+    return () => {
+      active = false;
+      window.clearInterval(statusInterval);
+    };
   }, [movieId]);
 
   async function sendReview(event: FormEvent<HTMLFormElement>) {
@@ -110,17 +122,25 @@ export function MovieDetailPage({ userId }: { userId: string }) {
             </article>
           ))}</div> : <div className="reviews-empty"><MessageCircle size={19} /><p>Aún no hay críticas. ¿Quieres ser la primera persona en compartir una?</p></div>}
         </div>
-        <form className="review-form" onSubmit={sendReview}>
-          <p className="eyebrow">TU TURNO</p><h3>¿Qué te ha parecido?</h3>
-          <span className="form-label">Tu nota</span>
-          <div className="rating-picker" role="radiogroup" aria-label="Elige una nota">
-            {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" role="radio" aria-checked={rating === value} aria-label={`${value} estrellas`} onMouseEnter={() => setHoverRating(value)} onMouseLeave={() => setHoverRating(0)} onClick={() => setRating(value)}><Star size={25} fill={(hoverRating || rating) >= value ? "currentColor" : "none"} /></button>)}
+        {canSubmitReview ? (
+          <form className="review-form" onSubmit={sendReview}>
+            <p className="eyebrow">TU TURNO</p><h3>¿Qué te ha parecido?</h3>
+            <span className="form-label">Tu nota</span>
+            <div className="rating-picker" role="radiogroup" aria-label="Elige una nota">
+              {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" role="radio" aria-checked={rating === value} aria-label={`${value} estrellas`} onMouseEnter={() => setHoverRating(value)} onMouseLeave={() => setHoverRating(0)} onClick={() => setRating(value)}><Star size={25} fill={(hoverRating || rating) >= value ? "currentColor" : "none"} /></button>)}
+            </div>
+            <label className="form-label" htmlFor="review-comment">Tu crítica</label>
+            <textarea id="review-comment" rows={5} maxLength={5000} required minLength={1} placeholder="Cuéntanos qué se quedó contigo…" value={comment} onChange={(event) => setComment(event.target.value)} />
+            <div className="review-form-bottom"><span>{comment.length}/5000</span><button className="button button-dark" type="submit" disabled={sending || rating < 1 || !comment.trim()}>{sending ? "Enviando…" : "Enviar crítica"} <ArrowUpRight size={16} /></button></div>
+            {notice && <p className={notice.startsWith("No se pudo") ? "form-notice form-notice--error" : "form-notice"} role="status">{notice}</p>}
+          </form>
+        ) : (
+          <div className="review-form review-form--paused" role="status">
+            <p className="eyebrow">CRÍTICAS TEMPORALMENTE PAUSADAS</p>
+            <h3>{canSubmitReview === null ? "Consultando el catálogo…" : "Volverán cuando el catálogo esté listo."}</h3>
+            <p>La exploración y la lectura de críticas siguen disponibles durante la limpieza.</p>
           </div>
-          <label className="form-label" htmlFor="review-comment">Tu crítica</label>
-          <textarea id="review-comment" rows={5} maxLength={5000} required minLength={1} placeholder="Cuéntanos qué se quedó contigo…" value={comment} onChange={(event) => setComment(event.target.value)} />
-          <div className="review-form-bottom"><span>{comment.length}/5000</span><button className="button button-dark" type="submit" disabled={sending || rating < 1 || !comment.trim()}>{sending ? "Enviando…" : "Enviar crítica"} <ArrowUpRight size={16} /></button></div>
-          {notice && <p className={notice.startsWith("No se pudo") ? "form-notice form-notice--error" : "form-notice"} role="status">{notice}</p>}
-        </form>
+        )}
       </section>
 
       {relatedError && <p className="detail-related-error" role="status">No se pudo cargar más del mismo género: {relatedError}</p>}

@@ -54,6 +54,55 @@ export interface MovieQuery {
   pageSize?: number;
 }
 
+export interface SystemStatus {
+  catalog: {
+    cleaning_status: string;
+    source_fingerprint: string | null;
+    cleaner_version: string | null;
+    updated_at: string | null;
+    error_code: string | null;
+  };
+  recommendations: {
+    status: string;
+    source_fingerprint: string | null;
+    recommendations_available: boolean;
+  };
+  capabilities: {
+    browse: boolean;
+    reviews: boolean;
+    recommendations: boolean;
+  };
+}
+
+export interface AuditRun {
+  run_id: string;
+  source_fingerprint: string;
+  cleaner_version: string;
+  status: string;
+  started_at: string;
+  completed_at?: string;
+  error_code?: string | null;
+  metrics?: Record<string, number>;
+  movies_examined?: number;
+  reviews_examined?: number;
+  llm_inferences?: number;
+  llm_unresolved?: number;
+  unresolved_ratings?: number;
+}
+
+export interface AuditDetail {
+  entity_id: string;
+  collection: string;
+  category: string;
+  field: string;
+  before: unknown;
+  after: unknown;
+  reason: string;
+  method: string;
+  evidence: Record<string, unknown>;
+  updated_at: string;
+}
+
 export function getMovies(query: MovieQuery = {}) {
   const params = new URLSearchParams();
   if (query.q?.trim()) params.set("q", query.q.trim());
@@ -85,4 +134,20 @@ export function submitReview(review: Omit<Review, "_id" | "date">) {
 
 export function getHealth() {
   return request<{ status: string; services: Record<string, string> }>("/api/health");
+}
+
+export function getSystemStatus() {
+  return request<SystemStatus>("/api/status");
+}
+
+export function getAuditRuns(limit = 20, offset = 0) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request<{ items: AuditRun[]; total: number }>(`/api/audit/runs?${params}`);
+}
+
+export function getAuditRunDetails(runId: string, limit = 50, offset = 0) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request<{ items: AuditDetail[]; total: number }>(
+    `/api/audit/runs/${encodeURIComponent(runId)}/details?${params}`,
+  );
 }

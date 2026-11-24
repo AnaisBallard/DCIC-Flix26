@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Iterator, TextIO
 
 from bson import json_util
@@ -28,10 +29,39 @@ def ensure_user(database, username: str, password: str, role: str) -> None:
 
 def ensure_database_access(client: MongoClient, database_name: str) -> None:
     database = client[database_name]
+    cleaner_role = "catalogCleaner"
+    cleaner_privileges = [
+        {
+            "resource": {"db": database_name, "collection": collection},
+            "actions": ["find", "insert", "update", "remove"],
+        }
+        for collection in (
+            "movies",
+            "reviews",
+            "_catalog_pipeline",
+            "_cleaning_audit_details",
+            "_cleaning_audit_runs",
+        )
+    ]
+    try:
+        database.command(
+            "updateRole", cleaner_role, privileges=cleaner_privileges, roles=[]
+        )
+    except OperationFailure as error:
+        if error.code != 11:
+            raise
+        database.command(
+            "createRole",
+            cleaner_role,
+            privileges=cleaner_privileges,
+            roles=[],
+        )
+
     for suffix, role in (
         ("CATALOG", "read"),
         ("RECOMMENDATION", "read"),
         ("CONSUMER", "readWrite"),
+        ("CLEANER", cleaner_role),
     ):
         username = os.environ[f"MONGODB_{suffix}_USER"]
         password = os.environ[f"MONGODB_{suffix}_PASSWORD"]
@@ -42,6 +72,10 @@ def ensure_database_access(client: MongoClient, database_name: str) -> None:
     database.reviews.create_index("movie_id")
     database.reviews.create_index("user_id")
     database.reviews.create_index([("movie_id", 1), ("user_id", 1)])
+    database["_cleaning_audit_runs"].create_index([("started_at", -1)])
+    database["_cleaning_audit_details"].create_index(
+        [("run_id", 1), ("updated_at", 1)]
+    )
 
 
 def file_digest(path: Path) -> str:
@@ -90,14 +124,18 @@ def collection_for(path: Path) -> str:
     return name[:-5]
 
 
-def import_file(database, path: Path) -> None:
+def import_file(database, path: Path, *, force_reload: bool = False) -> None:
     collection_name = collection_for(path)
     checksum = file_digest(path)
     manifest = database["_dataset_imports"]
     import_id = f"{collection_name}:{path.name}"
 
     previous_import = manifest.find_one({"_id": import_id})
-    if previous_import and previous_import["sha256"] == checksum:
+    if (
+        not force_reload
+        and previous_import
+        and previous_import["sha256"] == checksum
+    ):
         logger.info("Dataset %s is already loaded; skipping.", path.name)
         return
 
@@ -159,9 +197,85 @@ def main() -> None:
                 "no data was imported or cleaned.",
                 dataset_directory,
             )
+            database["_catalog_pipeline"].update_one(
+                {"_id": "catalog"},
+                {
+                    "$set": {
+                        "source_fingerprint": None,
+                        "cleaner_version": os.getenv("CLEANER_VERSION", "1"),
+                        "cleaning_status": "failed",
+                        "ready_event_status": "pending",
+                        "error_code": "dataset_missing",
+                        "updated_at": datetime.now(timezone.utc),
+                    },
+                    "$unset": {
+                        "lease_owner": "",
+                        "lease_until": "",
+                        "ready_event_id": "",
+                        "run_id": "",
+                        "completed_at": "",
+                    },
+                },
+                upsert=True,
+            )
             return
+
+        dataset_fingerprint = hashlib.sha256(
+            json.dumps(
+                [
+                    {"name": path.name, "sha256": file_digest(path)}
+                    for path in files
+                ],
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        cleaner_version = os.getenv("CLEANER_VERSION", "1")
+        pipeline_state = database["_catalog_pipeline"]
+        previous_state = pipeline_state.find_one({"_id": "catalog"})
+        pipeline_changed = (
+            previous_state is None
+            or previous_state.get("source_fingerprint") != dataset_fingerprint
+            or previous_state.get("cleaner_version") != cleaner_version
+        )
+        force_reload = previous_state is not None and pipeline_changed
+
         for path in files:
-            import_file(database, path)
+            import_file(database, path, force_reload=force_reload)
+
+        if pipeline_changed:
+            now = datetime.now(timezone.utc)
+            pipeline_state.update_one(
+                {"_id": "catalog"},
+                {
+                    "$set": {
+                        "source_fingerprint": dataset_fingerprint,
+                        "cleaner_version": cleaner_version,
+                        "cleaning_status": "pending",
+                        "attempt": 0,
+                        "ready_event_status": "pending",
+                        "updated_at": now,
+                        "error_code": None,
+                    },
+                    "$unset": {
+                        "lease_owner": "",
+                        "lease_until": "",
+                        "next_retry_at": "",
+                        "run_id": "",
+                        "completed_at": "",
+                    },
+                },
+                upsert=True,
+            )
+            logger.info(
+                "Catalog pipeline queued for cleaning (source fingerprint %s).",
+                dataset_fingerprint,
+            )
+        else:
+            logger.info(
+                "Catalog pipeline unchanged; preserving durable cleaning state."
+            )
 
 
 if __name__ == "__main__":

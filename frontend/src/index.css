@@ -329,12 +329,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .audit-card-heading > div { display: flex; flex-direction: column; gap: 4px; }
 .audit-card-heading > div span, .audit-card-label { font-size: 9px; font-weight: 700; letter-spacing: .13em; }
 .audit-card-heading > div small { color: var(--muted); font-size: 10px; }
-.service-status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding-top: 17px; }
+.service-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding-top: 17px; }
 .service-status { display: flex; align-items: center; gap: 7px; padding: 11px; border: 1px solid #e8e5dd; font-size: 10px; }
 .service-status strong { margin-left: auto; color: #417951; font-size: 9px; }
 .service-dot { width: 7px; height: 7px; border-radius: 50%; background: #dbb343; }
 .service-dot.is-ok { background: #59a270; box-shadow: 0 0 0 3px #59a27020; }
 .audit-error, .audit-loading { margin: 19px 0 0; color: var(--muted); font-size: 12px; }
+.audit-error { color: #b44335; }
+.pipeline-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; padding-top: 15px; }
+.pipeline-status-grid > div { display: flex; flex-direction: column; gap: 6px; padding: 12px; background: #f3f1eb; }
+.pipeline-status-grid span { color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: .1em; }
+.pipeline-status-grid strong { font-size: 11px; text-transform: capitalize; }
 .audit-unavailable-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; margin-top: 18px; }
 .audit-info-card { display: flex; min-height: 270px; flex-direction: column; align-items: flex-start; padding: 24px; background: #f5e1b4; }
 .audit-info-card--lilac { background: #e0d9f3; }
@@ -343,6 +348,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .audit-info-card > strong { margin-top: 12px; font: 700 24px var(--display); letter-spacing: -.05em; }
 .audit-info-card > p { max-width: 450px; margin: 9px 0 16px; color: #5d594f; font-size: 11px; line-height: 1.7; }
 .audit-badge { display: inline-flex; align-items: center; gap: 6px; margin-top: auto; padding: 7px 9px; border: 1px solid #24232148; border-radius: 99px; font-size: 9px; }
+.audit-runs { margin-top: 18px; padding: 23px 26px; border: 1px solid #dcd8ce; background: #fffefa; }
+.audit-run { border-bottom: 1px solid #e8e5dd; }
+.audit-run-toggle { display: flex; width: 100%; align-items: center; gap: 16px; padding: 14px 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.audit-run-toggle > span:first-child { display: flex; min-width: 160px; flex-direction: column; gap: 4px; }
+.audit-run-toggle strong { font-size: 11px; text-transform: capitalize; }
+.audit-run-toggle small, .audit-run-toggle > span:nth-child(2) { color: var(--muted); font-size: 9px; }
+.audit-run-toggle > svg { margin-left: auto; transition: transform .2s ease; }
+.audit-run-toggle > svg.is-expanded { transform: rotate(180deg); }
+.audit-details { padding: 0 0 14px; }
+.audit-detail { padding: 13px 0; border-top: 1px solid #efede7; }
+.audit-detail > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.audit-detail > div:first-child strong { font-size: 10px; }
+.audit-detail small, .audit-detail > p { color: var(--muted); font-size: 9px; }
+.audit-detail > p { margin: 7px 0; line-height: 1.5; }
+.audit-before-after { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.audit-before-after > span { min-width: 0; padding: 9px; overflow-wrap: anywhere; background: #f3f1eb; font-size: 9px; }
+.audit-before-after b { display: block; margin-bottom: 5px; color: var(--muted); font-size: 8px; text-transform: uppercase; }
+.audit-load-more { margin-top: 12px; padding: 9px 12px; border: 1px solid #dcd8ce; background: transparent; font-size: 9px; cursor: pointer; }
+.audit-load-more:disabled { opacity: .6; cursor: wait; }
 .audit-footnote { margin-top: 20px; color: var(--muted); font-size: 10px; text-align: right; }
 
 @keyframes rise-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }

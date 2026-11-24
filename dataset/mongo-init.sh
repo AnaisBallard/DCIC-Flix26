@@ -12,6 +12,8 @@ recommendation_user="$(encode_base64 "${MONGODB_RECOMMENDATION_USER:?MONGODB_REC
 recommendation_password="$(encode_base64 "${MONGODB_RECOMMENDATION_PASSWORD:?MONGODB_RECOMMENDATION_PASSWORD is required}")"
 consumer_user="$(encode_base64 "${MONGODB_CONSUMER_USER:?MONGODB_CONSUMER_USER is required}")"
 consumer_password="$(encode_base64 "${MONGODB_CONSUMER_PASSWORD:?MONGODB_CONSUMER_PASSWORD is required}")"
+cleaner_user="$(encode_base64 "${MONGODB_CLEANER_USER:?MONGODB_CLEANER_USER is required}")"
+cleaner_password="$(encode_base64 "${MONGODB_CLEANER_PASSWORD:?MONGODB_CLEANER_PASSWORD is required}")"
 
 init_script=/tmp/dcic-flix-mongo-init.js
 cat > "$init_script" <<EOF
@@ -33,6 +35,22 @@ target.createUser({
   user: decode("$consumer_user"),
   pwd: decode("$consumer_password"),
   roles: [{ role: "readWrite", db: databaseName }]
+});
+target.createRole({
+  role: "catalogCleaner",
+  privileges: [
+    { resource: { db: databaseName, collection: "movies" }, actions: ["find", "insert", "update", "remove"] },
+    { resource: { db: databaseName, collection: "reviews" }, actions: ["find", "insert", "update", "remove"] },
+    { resource: { db: databaseName, collection: "_catalog_pipeline" }, actions: ["find", "insert", "update", "remove"] },
+    { resource: { db: databaseName, collection: "_cleaning_audit_details" }, actions: ["find", "insert", "update", "remove"] },
+    { resource: { db: databaseName, collection: "_cleaning_audit_runs" }, actions: ["find", "insert", "update", "remove"] }
+  ],
+  roles: []
+});
+target.createUser({
+  user: decode("$cleaner_user"),
+  pwd: decode("$cleaner_password"),
+  roles: [{ role: "catalogCleaner", db: databaseName }]
 });
 
 target.movies.createIndex({ title: 1 });

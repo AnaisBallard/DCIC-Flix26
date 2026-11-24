@@ -3,8 +3,8 @@
 Plataforma universitaria para descubrir películas. El repositorio reúne una
 interfaz React, una gateway HTTP, servicios FastAPI, MongoDB, RabbitMQ y
 contenedores Docker. El catálogo, las fichas y las críticas están conectados;
-el agente de limpieza y el recomendador todavía no implementan su lógica de
-negocio.
+el agente de limpieza ya registra las correcciones y el recomendador todavía
+no genera resultados.
 
 Esta guía explica cómo ejecutar el proyecto, qué hace cada parte y cómo verificar
 los resultados. La arquitectura y los contratos se describen con más detalle en
@@ -21,15 +21,16 @@ debe confirmar están en [docs/decisions.md](docs/decisions.md).
 | Publicación de críticas | Validación en la API y publicación persistente en RabbitMQ |
 | Consumer | Validación, escritura idempotente en MongoDB y confirmación del mensaje |
 | Carga del dataset | Importación de los archivos `.json` y `.json.gz` admitidos |
-| Limpieza con LLM | Infraestructura preparada; limpieza de datos todavía no implementada |
-| Recomendación TF-IDF | Servicio esqueleto; algoritmo y API de recomendaciones todavía no implementados |
-| Auditoría de datos | `/audit` enseña el estado real de servicios; aún no hay informes de limpieza |
+| Limpieza con LLM | Normalización determinista, revisión de ratings ambiguos con OpenAI y estado durable; requiere `OPENAI_API_KEY` |
+| Recomendación TF-IDF | Espera el evento de catálogo listo; aún no hay índice, algoritmo ni resultados |
+| Auditoría de datos | `/audit` muestra estado, métricas e historial antes/después reales |
 | Autenticación | No implementada. El selector crea perfiles locales para identificar críticas durante el desarrollo |
 
-La topología de RabbitMQ incluye colas de votos y limpieza para preparar trabajo
-futuro; esto **no** significa que ya existan las rutas de publicación,
-consumidores o procesos de negocio correspondientes. La interfaz no inventa
-películas, recomendaciones, críticas ni resultados de limpieza.
+La topología de RabbitMQ incluye colas de limpieza y el evento durable de
+catálogo listo. La disponibilidad del catálogo se publica solo después de
+persistir la limpieza y su auditoría; las recomendaciones siguen indisponibles
+hasta que exista un índice real. La interfaz no inventa películas,
+recomendaciones, críticas ni resultados de limpieza.
 
 ## Requisitos
 
@@ -69,6 +70,7 @@ Cuando Vite esté listo, abre:
 - Aplicación: <http://localhost:5173>
 - Gateway pública: <http://localhost:8000>
 - Estado agregado: <http://localhost:8000/api/health>
+- Estado de negocio: <http://localhost:8000/api/status>
 
 Para detener los contenedores sin borrar los datos, usa `Ctrl+C` si ejecutaste
 Compose en primer plano o ejecuta:
@@ -87,7 +89,8 @@ HTTP necesarios, y el catálogo, el consumer y el servicio de recomendaciones
 esperan al cargador de datos. Consulta `docker compose ps` y los registros con
 `docker compose logs <servicio>` cuando un contenedor no llegue al estado
 esperado. El cargador y `rabbitmq-init` son tareas de inicialización y es normal
-que terminen con código cero.
+que terminen con código cero. El cleaning-agent espera a ambas tareas, pero la
+interfaz no espera a que acabe la limpieza.
 
 ## Configuración y secretos
 
@@ -97,13 +100,18 @@ las variables, los valores de desarrollo y su finalidad:
 - `MONGO_INITDB_ROOT_*`: cuenta administrativa usada solo para inicialización y
   carga.
 - `MONGODB_DATABASE`: base que contiene el catálogo y las críticas.
-- `MONGODB_CATALOG_*`, `MONGODB_RECOMMENDATION_*` y `MONGODB_CONSUMER_*`:
-  cuentas separadas para limitar los permisos de cada servicio.
+- `MONGODB_CATALOG_*`, `MONGODB_RECOMMENDATION_*`, `MONGODB_CONSUMER_*` y
+  `MONGODB_CLEANER_*`: cuentas separadas para limitar los permisos de cada
+  servicio.
 - `RABBITMQ_DEFAULT_*`: cuenta usada por los servicios productores y
   consumidores. `rabbitmq-init` sincroniza esa cuenta con el volumen persistente
   cuando se cambia la contraseña.
-- `OPENAI_API_KEY` y `OPENAI_MODEL`: previstos para una futura integración del
-  agente de limpieza. La clave es opcional mientras esa lógica no esté activa.
+- `OPENAI_API_KEY` y `OPENAI_MODEL`: usados por el agente solo para inferir
+  ratings ausentes o inválidos con comentarios útiles. Sin clave, la limpieza
+  queda explícitamente en `failed` y no publica el evento de catálogo listo si
+  encuentra casos que requieren inferencia.
+- `CLEANER_VERSION`: versión de reglas; al cambiarla, el cargador reimporta el
+  origen antes de limpiar de nuevo.
 
 Los valores de ejemplo son **solo para desarrollo local**; cámbialos antes de
 compartir un entorno. No guardes `.env`, contraseñas ni claves en Git. La clave
@@ -133,8 +141,14 @@ los scripts de `/docker-entrypoint-initdb.d/` se ejecutan solamente en una
 inicialización limpia, el cargador también reconcilia cuentas e índices en
 arranques posteriores. Añadir o cambiar datos debe hacerse en los archivos
 originales del dataset y verificarse en MongoDB; el proceso de importación no es
-un proceso de limpieza semántica. No marques el conjunto como limpio hasta
-inspeccionar las anomalías y validar un proceso explícito de limpieza.
+un proceso de limpieza semántica. El cargador persiste la huella y pone el
+pipeline en `pending` cuando cambia el dataset o `CLEANER_VERSION`. El agente
+registra cambios y métricas en MongoDB, reanuda mediante lease y solo emite
+`catalog.cleaning.completed` después de terminar correctamente. Las críticas
+nuevas se rechazan temporalmente hasta `ready`; las recomendaciones permanecen
+`waiting`/`indexing` porque el modelo todavía no existe. No ejecutes una
+limpieza masiva sobre un volumen que contenga datos importantes sin copia de
+seguridad y validación del equipo.
 
 Comprobaciones rápidas en PowerShell (las contraseñas son las del `.env`
 generado; adapta los comandos si las cambiaste):
@@ -156,7 +170,7 @@ de usuario están en español. Las rutas implementadas son:
 | `/` | Portada editorial y selección del catálogo disponible |
 | `/explorar` | Búsqueda por título o argumento, género, orden de la página visible y paginación |
 | `/pelicula/{movie_id}` | Ficha, críticas y formulario para enviar una crítica |
-| `/audit` | Estado de servicios y explicación de informes aún no disponibles |
+| `/audit` | Estado durable del pipeline, métricas e historial antes/después |
 
 El selector de perfil guarda identificadores aleatorios en el almacenamiento
 local del navegador; no valida una identidad y no sustituye un sistema de

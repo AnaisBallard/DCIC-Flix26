@@ -137,6 +137,8 @@ def integrated_services(monkeypatch):
             service_app = catalog_module.app
         elif request.url.host == "interaction-service":
             service_app = interaction_module.app
+        elif request.url.host == "cleaning-agent":
+            return httpx.Response(200, json={"cleaning_status": "ready"})
         else:
             return httpx.Response(200, json={"status": "ok"})
         transport = ASGITransport(app=service_app)

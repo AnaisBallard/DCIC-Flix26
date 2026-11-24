@@ -103,19 +103,21 @@ una recomendación personalizada.
 resultados. No presentar esta propuesta como funcionalidad implementada ni
 mostrar puntuaciones ficticias.
 
-### D-07 — Mantener el futuro LLM en el backend
+### D-07 — Mantener la llamada LLM en el backend
 
-**Decisión de seguridad:** si se integra un proveedor LLM, el agente del backend
-será el único responsable de llamarlo. La clave procede del entorno del
-servidor y nunca se publica en una variable `VITE_*` ni en el bundle.
+**Decisión de seguridad:** el agente del backend es el único responsable de
+llamar al proveedor LLM. La clave procede del entorno del servidor y nunca se
+publica en una variable `VITE_*` ni en el bundle.
 
 **Motivo:** todo valor entregado al navegador puede ser inspeccionado por sus
 usuarios.
 
-**Estado:** la variable y la imagen del servicio están preparadas, pero no hay
-llamada LLM, instrucción, esquema de aprobación ni corrección automática en
-producción. Antes de activar la función, hay que definir anonimización,
-validación determinista, revisión humana y límites de coste.
+**Estado:** `cleaning-agent` usa OpenAI solo para ratings ausentes o inválidos
+cuando hay texto útil. El backend normaliza primero, redacta correos, teléfonos
+y URLs, y no envía identificadores de usuario/película. Valida rating,
+confianza y formato; las inferencias de baja confianza quedan sin aplicar y se
+auditan. No se debe activar en un entorno compartido sin acordar consentimiento,
+revisión humana y límites de coste.
 
 ### D-08 — Validar mensajes en ambos lados del límite asíncrono
 
@@ -133,33 +135,32 @@ servicios.
 
 ### D-09 — Las métricas de auditoría requieren una fuente real
 
-**Decisión:** `/audit` enseña el healthcheck disponible y declara expresamente
-que faltan datos sobre anomalías, cambios y actividad del LLM.
+**Decisión:** `/audit` muestra estado real, métricas e historial persistido de
+antes/después, incluyendo qué cambios provinieron del LLM y sus niveles de
+confianza.
 
 **Motivo:** una pantalla de cifras ficticias sería difícil de distinguir de un
 resultado experimental real y no se podría defender en la evaluación.
 
-**Consecuencia:** diseñar primero el contrato de un informe de limpieza y su
-almacenamiento; solo entonces mostrar recuentos, valores antes/después y
-trazabilidad.
+**Consecuencia:** métricas visibles provienen de `_cleaning_audit_runs` y los
+cambios paginados de `_cleaning_audit_details`; un estado fallido no se presenta
+como catálogo listo.
 
 ### D-10 — Las dependencias runtime deben corresponder al código ejecutado
 
 **Decisión:** declarar una librería cuando una ruta o tarea del servicio la use,
-no solo porque figure en la arquitectura futura. Durante esta revisión se
-retiraron `pydantic-settings`, que no se importaba en los servicios, y las
-librerías previstas pero aún no utilizadas de los esqueletos de limpieza y
-recomendación.
+no solo porque figure en la arquitectura futura. Se retiraron `pydantic-settings`,
+que no se importaba; al implementar limpieza y eventos se añadieron únicamente
+las dependencias runtime que esos servicios importan.
 
 **Motivo:** instalar SDK de LLM o scikit-learn antes de implementar una función
 aumenta tamaño, mantenimiento y superficie de actualización sin producir
 capacidad funcional.
 
-**Consecuencia:** al implementar esas etapas, se agrega y fija la dependencia
-correspondiente en un cambio pequeño, se verifica que realmente se importe y
-se compila la imagen del servicio. No se elimina la validación repetida en los
-límites HTTP y de mensajería: es deliberada y debe probarse para evitar que los
-contratos diverjan.
+**Consecuencia:** se fijan las dependencias del cliente HTTP, MongoDB y
+RabbitMQ en los servicios que las usan. No se elimina la validación repetida en
+los límites HTTP y de mensajería: es deliberada y debe probarse para evitar que
+los contratos diverjan.
 
 **Seguimiento:** npm todavía reporta cinco avisos de nivel alto para la versión
 de Vite y su plugin fijadas. El arreglo sugerido implica cambios mayores y no
@@ -167,19 +168,20 @@ se aplicó automáticamente; requiere una revisión de compatibilidad separada.
 
 ## Decisiones que requieren aprobación del equipo
 
-### Propuesta D-11 — Persistir el estado del pipeline del catálogo
+### D-11 — Persistir el estado del pipeline del catálogo
 
 **Fecha:** 2026-11-24
 
-**Estado:** propuesta para discutir; todavía no está implementada ni ratificada.
+**Estado:** implementada en código; pendiente de discusión y ratificación del
+equipo.
 
 **Contexto:** `dataset-loader` ya registra el SHA-256 de cada archivo en
-`_dataset_imports` y omite la importación si no cambió. No existe todavía un
-estado persistente de limpieza; el endpoint de salud de `cleaning-agent` solo
-confirma que el proceso HTTP está activo. La topología RabbitMQ preparada para
-`catalog.cleaning` tampoco significa que haya un consumidor de limpieza.
+`_dataset_imports` y omite la importación si no cambió. Se añade un estado
+persistente de limpieza, auditoría durable, publicación del evento de catálogo
+listo y un consumidor que deja explícito que aún falta el índice de
+recomendaciones.
 
-**Decisión propuesta:**
+**Decisión implementada (requiere ratificación del equipo):**
 
 1. MongoDB será la fuente de verdad durable en una colección
    `_catalog_pipeline`, con un documento activo `_id: "catalog"` que conserva
@@ -188,7 +190,7 @@ confirma que el proceso HTTP está activo. La topología RabbitMQ preparada para
    historial de ejecuciones.
 2. Después de importar los archivos, `dataset-loader` calculará una huella
    estable del conjunto: SHA-256 del listado ordenado de nombres de archivo y
-   sus hashes SHA-256. La versión de las reglas de limpieza también formará
+   sus hashes SHA-256. La versión de las reglas de limpieza también forma
    parte de la versión de procesamiento; cambiar el dataset o las reglas
    requerirá una nueva ejecución deliberada.
 3. El documento tendrá como mínimo `source_fingerprint`,
@@ -197,28 +199,28 @@ confirma que el proceso HTTP está activo. La topología RabbitMQ preparada para
    `error_code` seguro, sin secretos. Los estados de limpieza serán `pending`,
    `running`, `ready` y `failed`; `ready_event_status` será `pending` o `sent`.
 4. Si la huella y la versión ya están en `ready`, el agente no vuelve a limpiar
-   en un arranque posterior. Si no hay estado para esa versión, el dataset
-   cambió o el estado anterior es `failed`, se programa una ejecución. Un
+   en un arranque posterior. Si no hay estado para esa versión o cambió el
+   dataset, se programa una ejecución; `failed` se reintenta con backoff. Un
    estado `running` solo puede recuperarse cuando vence su lease; el agente
    reclama el trabajo mediante una actualización atómica en MongoDB y renueva
    el lease mientras trabaja para evitar ejecuciones concurrentes.
 5. El agente marca `ready` únicamente después de persistir todas las
    correcciones y el informe de auditoría; en esa misma escritura deja
-   `ready_event_status: "pending"`. Un fallo conserva `failed`, el motivo
-   seguro y el contador de intentos; no se anuncia éxito. La limpieza debe ser
-   idempotente para poder reintentar tras una interrupción.
+   `ready_event_status: "pending"`. Un fallo conserva `failed`, un código de
+   error seguro y el contador de intentos; no se anuncia éxito. La limpieza
+   debe ser idempotente para poder reintentar tras una interrupción.
 6. Mientras `ready_event_status` sea `pending`, el agente publica con
    confirmación un evento persistente `catalog.cleaning.completed` en
    `dcic.events`, que incluye `event_id`, `source_fingerprint` y
    `cleaner_version`. Solo después de la confirmación lo cambia a `sent`. Si se
    interrumpe entre la publicación y esa escritura, vuelve a publicar el mismo
-   `event_id`; el consumidor debe deduplicar por ese identificador. Así, la
-   notificación no se pierde aunque MongoDB y RabbitMQ no compartan una
-   transacción. El recomendador consume el evento para iniciar o reutilizar su
-   índice y mantiene un estado de preparación separado: la salud del proceso
-   no equivale a que el índice esté listo.
-7. La gateway expondrá `GET /api/status`, separado del healthcheck de liveness.
-   Responderá `200` con el estado de negocio, incluso si una etapa está en
+   `event_id`; el consumidor aplica de forma idempotente el fingerprint actual.
+   Así, la notificación no se pierde aunque MongoDB y RabbitMQ no compartan una
+   transacción. El recomendador consume el evento idempotentemente y mantiene
+   un estado de preparación separado. Por ahora informa `indexing`: no existe
+   un índice implementado y no declara recomendaciones listas.
+7. La gateway expone `GET /api/status`, separado del healthcheck de liveness.
+   Responde `200` con el estado de negocio, incluso si una etapa está en
    `failed`; los errores se expresan como códigos seguros, no como trazas.
    Forma propuesta:
 
@@ -226,7 +228,7 @@ confirma que el proceso HTTP está activo. La topología RabbitMQ preparada para
    {
      "catalog": {
        "cleaning_status": "running",
-       "source_fingerprint": "sha256:…",
+       "source_fingerprint": "64 caracteres hexadecimales",
        "updated_at": "2026-11-24T19:00:00Z",
        "error_code": null
      },
@@ -243,8 +245,8 @@ confirma que el proceso HTTP está activo. La topología RabbitMQ preparada para
    recomendación admite `waiting`, `indexing`, `ready` y `failed`. La lectura y
    exploración siguen disponibles en todos los estados. `reviews` se habilita
    cuando la limpieza está `ready`; `recommendations` requiere limpieza e
-   índice `ready`. Compose no debe retrasar la disponibilidad de la interfaz
-   hasta que termine la limpieza.
+   índice `ready`. Compose no retrasa la disponibilidad de la interfaz hasta que
+   termine la limpieza.
 
 **Arranque en frío:** la importación deja el estado en `pending`; el agente lo
 reclama, lo cambia a `running`, sanea, guarda el informe, pasa a `ready` y
@@ -255,14 +257,14 @@ se omite la limpieza. Si el contenedor se interrumpió durante `running`, se
 espera el vencimiento del lease y se reintenta de forma idempotente. Una nueva
 huella o versión invalida el resultado anterior y vuelve a `pending`.
 
-**Consecuencias y puntos que requieren validación:** habría que dar al agente
-permisos MongoDB mínimos para leer/escribir su estado y los datos de catálogo,
-hacer que espere a que `dataset-loader` termine y declarar en RabbitMQ la cola
-durable que recibirá `catalog.cleaning.completed`. La configuración actual no
-implementa esos cambios. Además, el cargador actual hace upsert de documentos,
-pero no elimina los documentos que ya no aparecen en un archivo fuente; ese
-caso debe resolverse antes de tratar la eliminación o sustitución de archivos
-como una reconciliación completa.
+**Consecuencias y puntos que requieren validación:** el cargador crea o
+reconcilia un rol MongoDB limitado por colección; Compose espera al cargador y
+RabbitMQ; la cola durable y el evento están declarados. La limpieza solo se
+considera lista cuando sus cambios y auditoría se han persistido. El recomendador
+consume el evento y se queda en `indexing`, porque no existe todavía el modelo.
+Además, el cargador hace upsert de documentos, pero no elimina los documentos
+que ya no aparecen en un archivo fuente; ese caso debe resolverse antes de
+tratar la eliminación o sustitución de archivos como reconciliación completa.
 
 **Alternativas consideradas:** usar solo healthchecks de Compose (no persisten
 el resultado de limpieza); usar solo eventos RabbitMQ (un evento perdido no es
@@ -280,10 +282,10 @@ Estas preguntas no se consideran resueltas por el código inicial:
    cada contrato?
 2. ¿Cómo se autenticará el usuario antes de aceptar críticas reales? ¿Qué
    identificador sustituirá al perfil local?
-3. ¿Qué roles y permisos MongoDB hacen falta cuando se implemente el
-   recomendador o la limpieza?
-4. ¿Qué anomalías existen realmente en `movies.json.gz` y `reviews.json.gz`, y
-   qué reglas aprobadas pueden corregirlas sin borrar información válida?
+3. ¿El rol MongoDB limitado por colección para la limpieza cubre las acciones
+   mínimas sin bloquear un despliegue sobre un volumen ya existente?
+4. ¿Qué anomalías de `movies.json.gz` y `reviews.json.gz` deben corregirse o
+   conservarse, y las reglas actuales evitan suficientes falsos positivos?
 5. ¿Qué experimento demostraría que TF-IDF más coseno es mejor que una línea
    base sencilla? ¿Cómo se evita recomendar solo películas con sinopsis
    completas?
@@ -294,8 +296,8 @@ Estas preguntas no se consideran resueltas por el código inicial:
 8. ¿Debe exponerse un endpoint de géneros distintos y orden global de
    resultados para que los filtros y el selector de orden cubran todo el
    catálogo y no solo una muestra o página?
-9. ¿Qué casos de prueba y criterios de aceptación deben añadirse a dataset
-   loader, cleaning-agent y recommendation-service al dejar de ser esqueletos?
+9. ¿Qué evidencia integrada falta para validar dataset-loader, cleaning-agent y
+   el futuro índice de recommendation-service contra la rúbrica?
 
 ## Registro de cambios futuros
 

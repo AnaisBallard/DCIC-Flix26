@@ -28,17 +28,50 @@ al catálogo, RabbitMQ ni MongoDB. La gateway permite, por defecto, el origen
 | --- | --- | --- |
 | `GET /health` | Salud del proceso gateway para Docker Compose | Gateway |
 | `GET /api/health` | Estado agregado de servicios HTTP | Servicios de salud |
+| `GET /api/status` | Estado durable del catálogo, recomendador y capacidades | Cleaning-agent y recomendador |
+| `GET /api/audit/runs` | Historial paginado de limpiezas | Cleaning-agent |
+| `GET /api/audit/runs/{run_id}/details` | Cambios antes/después paginados | Cleaning-agent |
 | `GET /api/movies` | Buscar, filtrar y paginar películas | Catálogo |
 | `GET /api/movies/{movie_id}` | Obtener la ficha de una película | Catálogo |
 | `GET /api/movies/{movie_id}/reviews` | Leer críticas existentes | Catálogo |
-| `POST /api/interactions/reviews` | Publicar una nueva crítica | Interaction-service |
+| `POST /api/interactions/reviews` | Publicar una crítica si el catálogo está listo | Cleaning-agent e interaction-service |
 
 `GET /health` comprueba la disponibilidad local de la gateway. No garantiza por
 sí solo que el catálogo u otros servicios respondan. `/api/health` comprueba
-catalog, interaction, recommendation y consumer; devuelve un estado no saludable
-si un servicio necesario no está disponible. Que el servicio
+catalog, interaction, recommendation, consumer y cleaning-agent; devuelve un
+estado no saludable si un servicio necesario no está disponible. Que el servicio
 `recommendation` responda `ok` solo confirma que su proceso está activo: todavía
 no ofrece recomendaciones.
+
+`GET /api/status` devuelve `200` con el estado de negocio aunque la limpieza
+esté `pending`, `running` o `failed`. La gateway activa la capacidad de publicar
+críticas solo cuando `catalog.cleaning_status` es `ready`. Las recomendaciones
+solo serían activas si el recomendador declara `ready`; el código actual se
+queda en `waiting` o `indexing` y no ofrece resultados.
+
+Ejemplo de forma (los valores no describen una ejecución real):
+
+```json
+{
+  "catalog": {
+    "cleaning_status": "running",
+    "source_fingerprint": "64 caracteres hexadecimales",
+    "cleaner_version": "1",
+    "updated_at": "2026-11-24T19:00:00Z",
+    "error_code": null
+  },
+  "recommendations": {
+    "status": "waiting",
+    "source_fingerprint": null,
+    "recommendations_available": false
+  },
+  "capabilities": {
+    "browse": true,
+    "reviews": false,
+    "recommendations": false
+  }
+}
+```
 
 Al llamar a un servicio interno, la gateway conserva la respuesta HTTP del
 servicio. Un fallo de conexión upstream se traduce a `503 Service Unavailable`;
@@ -124,6 +157,10 @@ POST /api/interactions/reviews
 Content-Type: application/json
 ```
 
+Antes de reenviar una crítica, la gateway consulta el estado de limpieza. Si el
+catálogo no está `ready`, responde `503 Service Unavailable` sin publicar el
+evento en RabbitMQ.
+
 ```json
 {
   "movie_id": "573a13a4f29313caabd10527",
@@ -203,6 +240,43 @@ contenido no pasa la validación, se rechaza sin reencolado para que RabbitMQ lo
 envíe a la cola de mensajes fallidos. Los campos históricos `user_name` y
 `user_email` no se generan ni se aceptan desde la interfaz.
 
+## Evento de RabbitMQ: catálogo limpio
+
+Cuando los datos y el informe de auditoría se han persistido, `cleaning-agent`
+publica con confirmación un mensaje persistente a:
+
+- Exchange: `dcic.events` (tipo `topic`, durable).
+- Routing key: `catalog.cleaning.completed`.
+- Cola: `recommendations.catalog-ready` (durable).
+- Exchange de mensajes fallidos: `dcic.events.dlx`.
+- Cola de mensajes fallidos: `dead-letter.recommendations.catalog-ready`.
+
+```json
+{
+  "event_id": "sha256-determinista-de-huella-y-versión",
+  "event_type": "catalog.cleaning.completed",
+  "source_fingerprint": "64 caracteres hexadecimales",
+  "cleaner_version": "1",
+  "occurred_at": "2026-11-24T19:00:00+00:00"
+}
+```
+
+El publicador cambia `ready_event_status` a `sent` solo después de la
+confirmación del broker. Si se interrumpe después de publicar, el reintento usa
+el mismo `event_id`; el consumidor verifica que coincida con el estado durable
+actual y procesa el cambio de forma idempotente. El servicio de recomendaciones
+acepta el evento y queda en `indexing`, pero no afirma que exista un índice.
+
+## Auditoría de limpieza
+
+`GET /api/audit/runs?limit=20&offset=0` devuelve resúmenes recientes con el
+estado, huella, versión, conteos de documentos, métricas por categoría e
+inferencias LLM. `GET /api/audit/runs/{run_id}/details?limit=50&offset=0`
+devuelve el cambio concreto: colección, campo, valores antes/después, motivo,
+método y evidencia. El `run_id` es SHA-256 en hexadecimal. Los registros de
+auditoría no incluyen `user_email` ni `user_id`; el texto de críticas se redacta
+antes de almacenarse en una comparación.
+
 ## Topología preparada y contratos aún pendientes
 
 `rabbitmq/definitions.json` también declara:
@@ -210,11 +284,11 @@ envíe a la cola de mensajes fallidos. Los campos históricos `user_name` y
 | Routing key | Cola | Estado |
 | --- | --- | --- |
 | `interaction.vote.created` | `interactions.votes` | Topología declarada; API, esquema y consumidor de votos pendientes |
-| `catalog.cleaning.requested` | `catalog.cleaning` | Topología declarada; esquema y proceso de limpieza pendientes |
+| `catalog.cleaning.requested` | `catalog.cleaning` | Cola de solicitud declarada; aún no existe productor HTTP para solicitar limpieza |
 
-No publiques en esas rutas hasta documentar y probar el contrato completo. La
-existencia de una cola no implica que haya un consumidor activo, reintentos
-correctos o cambios aplicados al catálogo.
+No publiques solicitudes en esas rutas hasta documentar y probar el contrato
+completo. La existencia de una cola no implica por sí sola que haya un
+consumidor activo, reintentos correctos o cambios aplicados al catálogo.
 
 ## Códigos de error esperados
 

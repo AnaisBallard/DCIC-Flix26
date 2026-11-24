@@ -12,24 +12,28 @@ flowchart LR
     Browser[Navegador] -->|HTTP :5173| Frontend[React + Vite]
     Frontend -->|HTTP :8000, CORS| Gateway[Gateway FastAPI]
     Gateway -->|HTTP| Catalog[Servicio de catálogo]
+    Gateway -->|estado + gate de críticas| Cleaning[Agente de limpieza]
     Gateway -->|HTTP| Interaction[Servicio de interacción]
-    Gateway -.->|health; recomendaciones aún no implementadas| Recommendation[Servicio de recomendaciones]
+    Gateway -->|estado| Recommendation[Servicio de recomendaciones]
     Gateway -.->|health| Consumer[Consumer]
     Catalog -->|lectura| Mongo[(MongoDB)]
-    Recommendation -.->|acceso previsto| Mongo
+    Recommendation -->|lectura de estado| Mongo
     Interaction -->|evento persistente| Broker[RabbitMQ]
     Broker -->|cola de críticas| Consumer
     Consumer -->|lectura/escritura| Mongo
     Loader[Cargador del dataset] -->|upsert e índices| Mongo
-    Broker -.->|cola preparada| Cleaning[Agente de limpieza]
-    Cleaning -.->|integración futura| LLM[Proveedor LLM]
+    Loader -->|huella y estado pending| Mongo
+    Cleaning -->|lectura/escritura y auditoría| Mongo
+    Cleaning -->|evento catalog.cleaning.completed| Broker
+    Broker -->|catalog-ready| Recommendation
+    Cleaning -->|ratings ambiguos, texto redactado| LLM[Proveedor OpenAI]
 ```
 
-Las líneas discontinuas indican una relación futura o una comprobación de
-estado, no una funcionalidad de negocio terminada. Hoy, el catálogo puede
-consultarse y las críticas pueden atravesar la gateway, RabbitMQ, el consumer y
-MongoDB. El servicio de recomendaciones y el agente de limpieza son esqueletos
-de aplicación: no calculan recomendaciones ni modifican datos.
+Las líneas discontinuas indican una comprobación de salud. El agente de
+limpieza aplica normalizaciones deterministas, registra cada cambio y usa
+OpenAI únicamente para ratings ausentes o inválidos con comentario útil. El
+recomendador consume el evento de catálogo listo, pero todavía no crea un
+índice ni sirve resultados.
 
 ## 2. Servicios y propiedad de los datos
 
@@ -41,15 +45,14 @@ de aplicación: no calculan recomendaciones ni modifican datos.
 | `interaction-service` | Valida y publica críticas como eventos confirmados | RabbitMQ; no escribe en MongoDB |
 | `consumer` | Valida mensajes de crítica y los persiste de manera idempotente | MongoDB de lectura/escritura y RabbitMQ |
 | `dataset-loader` | Carga archivos admitidos y reconcilia cuentas e índices | Cuenta administrativa de MongoDB; trabajo de inicialización |
-| `cleaning-agent` | Endpoint de salud y configuración de contenedor | La lógica LLM/limpieza no está implementada |
-| `recommendation-service` | Endpoint de salud y configuración de contenedor | TF-IDF, similitud coseno y acceso de lectura aún no implementados |
+| `cleaning-agent` | Pipeline de limpieza, auditoría durable, estado y publicación de catálogo listo | Escritura limitada a películas, críticas y colecciones de pipeline/auditoría; OpenAI por entorno |
+| `recommendation-service` | Consume el evento de catálogo listo y expone su estado | No hay índice ni API de recomendaciones; nunca indica `ready` sin motor |
 | `mongodb` | Almacén persistente del catálogo y las críticas | Solo red `data` |
 | `rabbitmq` | Broker, exchange, colas, bindings y colas de mensajes fallidos | Solo red `messaging` |
 
 Cada servicio HTTP tiene un `Dockerfile` y un `requirements.txt` propios. Las
-dependencias runtime deben limitarse al código que realmente ejecuta ese
-servicio; añade las librerías del LLM y del modelo cuando se implementen y
-prueben sus funciones, no solo porque estén previstas.
+dependencias runtime corresponden al código que ejecuta ese servicio; el agente
+usa HTTP para OpenAI y el recomendador usa RabbitMQ para recibir el evento.
 
 ## 3. Redes y límites de confianza
 
@@ -61,9 +64,9 @@ puede resolver cada servicio:
 | `frontend_gateway` (interna) | `frontend`, `gateway` | Comunicación HTTP entre navegador del contenedor y gateway |
 | `host_ingress` (no interna) | `frontend`, `gateway` | Publicar los puertos HTTP 5173 y 8000 en el host |
 | `backend` (interna) | `gateway`, servicios HTTP internos | Reenvío HTTP entre servicios |
-| `data` (interna) | `mongodb`, `dataset-loader`, catálogo, recomendaciones, consumer | Acceso a MongoDB |
-| `messaging` (interna) | `rabbitmq`, `rabbitmq-init`, interacción, consumer, cleaning-agent | Acceso a RabbitMQ |
-| `llm_egress` (no interna) | `cleaning-agent` | Salida prevista para una futura API LLM |
+| `data` (interna) | `mongodb`, `dataset-loader`, catálogo, recomendaciones, consumer, cleaning-agent | Acceso a MongoDB |
+| `messaging` (interna) | `rabbitmq`, `rabbitmq-init`, interacción, consumer, cleaning-agent, recommendation-service | Acceso a RabbitMQ |
+| `llm_egress` (no interna) | `cleaning-agent` | Salida del agente hacia OpenAI |
 
 MongoDB no pertenece a `frontend_gateway`, `host_ingress` ni `backend`; RabbitMQ
 tampoco. El frontend comparte con la gateway el segmento de entrada del host,
@@ -105,15 +108,17 @@ el contrato de catálogo.
 ## 5. Flujo asíncrono: creación de una crítica
 
 1. La interfaz envía `movie_id`, `user_id`, `rating` y `comment` a la gateway.
-2. Gateway e interaction-service validan los límites del contrato. Repetir
+2. Antes de reenviar, la gateway consulta el estado de limpieza y rechaza con
+   `503` si el catálogo todavía no está `ready`.
+3. Gateway e interaction-service validan los límites del contrato. Repetir
    validaciones en ambos límites es deliberado: ambos servicios deben poder
    rechazar una solicitud inválida aunque se llamen por separado.
-3. Interaction-service publica un mensaje persistente en `dcic.events` con la
+4. Interaction-service publica un mensaje persistente en `dcic.events` con la
    clave `interaction.review.created` y espera la confirmación del broker.
-4. RabbitMQ enruta el evento a `interactions.reviews`.
-5. El consumer valida de nuevo el evento y hace un upsert en `reviews` con
+5. RabbitMQ enruta el evento a `interactions.reviews`.
+6. El consumer valida de nuevo el evento y hace un upsert en `reviews` con
    `_id = event_id`.
-6. El consumer confirma el mensaje solo después de persistir correctamente.
+7. El consumer confirma el mensaje solo después de persistir correctamente.
    MongoDB inaccesible produce reencolado; un mensaje inválido se rechaza hacia
    la cola de mensajes fallidos.
 
@@ -132,8 +137,9 @@ persistente y `dataset/mongo-init.sh` montado en
 vez un volumen vacío. El script crea:
 
 - una cuenta de lectura para el catálogo;
-- una cuenta de lectura para el futuro recomendador;
+- una cuenta de lectura para el servicio de recomendaciones;
 - una cuenta de lectura y escritura para el consumer;
+- un rol limitado para `cleaning-agent`, definido por colección;
 - índices de catálogo y críticas.
 
 Como el punto de entrada de Mongo solo ejecuta esos scripts en la primera
@@ -154,11 +160,35 @@ Los archivos suministrados en esta copia son `movies.json.gz` y
 películas y 61 488 críticas; verifica los recuentos en la instancia antes de
 usar cifras en una presentación, porque la fuente puede cambiar.
 
-La carga preserva el contenido de origen y **no** equivale a detectar ni
-corregir anomalías. Antes de crear un agente de limpieza, el equipo debe perfilar
-el dataset real, acordar reglas y registrar los cambios antes/después. El perfil
-estructural reproducible está en [data-profile.md](data-profile.md). No
-interpretes una importación correcta como una confirmación de calidad.
+La carga preserva los archivos de origen y **no** equivale a detectar ni
+corregir anomalías. Después de cargar, registra una huella estable en
+`_catalog_pipeline` y marca la limpieza como `pending` cuando cambia la fuente o
+`CLEANER_VERSION`. El perfil estructural reproducible está en
+[data-profile.md](data-profile.md). No interpretes una importación correcta
+como una confirmación de calidad.
+
+### Estado durable, limpieza y auditoría
+
+`cleaning-agent` reclama `_catalog_pipeline/catalog` mediante una actualización
+atómica y un lease renovable. Normaliza años, duración, géneros, ratings IMDb,
+fechas y ratings de críticas; descarta marcadores de spam y referencias huérfanas,
+redirige críticas al registro canónico y elimina duplicados exactos/conservadores.
+Las críticas ambiguas se envían a OpenAI en lotes, sin identificadores, correos,
+URLs ni teléfonos; los resultados de baja confianza quedan sin inferir y se
+registran explícitamente.
+
+Cada cambio queda en `_cleaning_audit_details`; el resumen con métricas, conteos
+y huella queda en `_cleaning_audit_runs`. Los documentos de auditoría omiten
+`user_email` y `user_id`, y el texto usado en detalles se redacta. La gateway
+expone `GET /api/status`, `GET /api/audit/runs` y los detalles paginados. La
+gateway permite crear críticas solo cuando la limpieza está `ready`.
+
+El estado pasa a `ready` solo después de persistir datos e informe. Un evento
+persistente y confirmado `catalog.cleaning.completed` se publica a
+`recommendations.catalog-ready`; si MongoDB no registra el envío, el mismo
+`event_id` se vuelve a publicar. El recomendador restaura el estado del catálogo
+tras reiniciarse y marca `indexing`, pero continúa `recommendations_available:
+false` mientras no haya un índice implementado.
 
 ## 7. RabbitMQ y topología
 
@@ -168,13 +198,14 @@ RabbitMQ usa una imagen oficial fijada, volumen persistente, configuración en
 
 - exchange topic durable `dcic.events`;
 - exchange durable `dcic.events.dlx` para mensajes fallidos;
-- colas `interactions.reviews`, `interactions.votes` y `catalog.cleaning`;
+- colas `interactions.reviews`, `interactions.votes`, `catalog.cleaning` y
+  `recommendations.catalog-ready`;
 - una cola durable de mensajes fallidos para cada una de esas colas;
-- bindings para críticas, votos y solicitudes de limpieza.
+- bindings para críticas, votos, solicitudes de limpieza y catálogo listo.
 
-La topología preparada para votos y limpieza no implica que sus productores o
-consumidores estén implementados. Cuando el volumen conserva credenciales
-anteriores, `rabbitmq-init` espera el healthcheck del broker y reconcilia
+La cola `catalog.cleaning` sigue siendo una cola de solicitudes preparada; el
+evento de finalización sí tiene publicador y consumidor. Cuando el volumen
+conserva credenciales anteriores, `rabbitmq-init` espera el healthcheck del broker y reconcilia
 usuario y permisos antes de iniciar los servicios dependientes. Utiliza el
 volumen de datos existente en modo de solo lectura y no reinicializa el broker.
 
@@ -187,9 +218,9 @@ implementada toda la lógica de negocio: un estado `ok` significa que el proceso
 está disponible, no que la limpieza o las recomendaciones ya funcionen.
 
 `depends_on` con condiciones de salud o de finalización fija el orden inicial;
-no sustituye reintentos, recuperación ante fallos ni observabilidad en
-producción. La mayoría de servicios persiste con `unless-stopped`; el cargador
-y `rabbitmq-init` son tareas puntuales.
+el lease, el estado persistente y los reintentos cubren el pipeline de limpieza.
+La mayoría de servicios persiste con `unless-stopped`; el cargador y
+`rabbitmq-init` son tareas puntuales.
 
 ## 9. Seguridad, secretos y límites conocidos
 
@@ -204,8 +235,8 @@ y `rabbitmq-init` son tareas puntuales.
 - La red no sustituye TLS, rotación de claves, límites de tasa ni un análisis
   de las imágenes y dependencias.
 - El endpoint de salud de recomendaciones no demuestra que exista un motor.
-  Los reportes de auditoría tampoco existen hasta que haya contrato y persistencia
-  para esas métricas.
+  Su estado de negocio permanece en `waiting` o `indexing`; el algoritmo y sus
+  resultados siguen pendientes.
 
 ## 10. Cómo comprobar y desarrollar cambios
 

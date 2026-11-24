@@ -83,6 +83,57 @@ async def test_invalid_rating_is_rejected_before_forwarding():
 
 
 @pytest.mark.asyncio
+async def test_review_submission_is_blocked_until_catalog_is_ready():
+    def respond(request):
+        return httpx.Response(
+            200,
+            json={"cleaning_status": "running"},
+        )
+
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport) as upstream:
+        app.dependency_overrides[get_http_client] = lambda: upstream
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://gateway"
+        ) as client:
+            response = await client.post(
+                "/api/interactions/reviews",
+                json={
+                    "movie_id": MOVIE_ID,
+                    "user_id": "usr_test",
+                    "rating": 5,
+                    "comment": "Review",
+                },
+            )
+
+    assert response.status_code == 503
+    assert "until catalog cleaning is ready" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_business_status_keeps_browsing_when_recommendations_are_unavailable():
+    def respond(request):
+        if request.url.host == "cleaning-agent":
+            return httpx.Response(200, json={"cleaning_status": "ready"})
+        return httpx.Response(503, json={"detail": "offline"})
+
+    transport = httpx.MockTransport(respond)
+    async with httpx.AsyncClient(transport=transport) as upstream:
+        app.dependency_overrides[get_http_client] = lambda: upstream
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://gateway"
+        ) as client:
+            response = await client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["capabilities"] == {
+        "browse": True,
+        "reviews": True,
+        "recommendations": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_upstream_connection_failure_is_reported_as_unavailable():
     transport = httpx.MockTransport(
         lambda request: (_ for _ in ()).throw(httpx.ConnectError("offline"))
