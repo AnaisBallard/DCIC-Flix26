@@ -3,13 +3,20 @@ import { useState, type FormEvent } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { Brand } from "./Brand";
 import { UserSelector } from "./UserSelector";
+import type { Profile } from "../services/profiles";
 
 export function Header({
   userId,
+  profiles,
+  storageWarning,
   onUserChange,
+  onAddProfile,
 }: {
   userId: string;
+  profiles: Profile[];
+  storageWarning: string;
   onUserChange: (id: string) => void;
+  onAddProfile: () => boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -60,7 +67,13 @@ export function Header({
               <Search size={19} />
             </button>
           )}
-          <UserSelector userId={userId} onChange={onUserChange} />
+          <UserSelector
+            userId={userId}
+            profiles={profiles}
+            storageWarning={storageWarning}
+            onChange={onUserChange}
+            onAddProfile={onAddProfile}
+          />
         </div>
       </div>
     </header>

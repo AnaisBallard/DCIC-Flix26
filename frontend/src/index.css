@@ -61,6 +61,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .profile-option { display: flex; width: 100%; min-height: 39px; align-items: center; justify-content: space-between; padding: 7px; border: 0; border-radius: 7px; background: transparent; cursor: pointer; text-align: left; font-size: 12px; }
 .profile-option:hover { background: #f3f0e9; }
 .profile-add { justify-content: flex-start; gap: 8px; margin-top: 5px; border-top: 1px solid var(--line); border-radius: 0; color: var(--blue); }
+.profile-storage-warning { margin: 8px 7px 2px; color: #865133; font-size: 10px; line-height: 1.5; }
 .mobile-menu-toggle { display: none; }
 
 .hero-section { position: relative; min-height: 730px; overflow: hidden; background: #f2d86c; }
@@ -236,6 +237,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .select-wrap select, .sort-wrap select { padding: 9px 25px 9px 12px; border: 1px solid #d8d4ca; border-radius: 99px; appearance: none; color: var(--ink); background: #fffefa; cursor: pointer; font-size: 11px; }
 .select-wrap::after { position: absolute; top: 8px; right: 11px; pointer-events: none; content: "⌄"; font-size: 13px; }
 .filter-count { margin-left: auto; color: #77746c; font-size: 11px; }
+.filter-warning { margin: 12px 0; color: #865133; font-size: 11px; }
 .sort-wrap { gap: 5px; }
 .sort-wrap select { padding: 7px 5px; border: 0; background: transparent; font-weight: 600; }
 .active-filter { display: inline-flex; align-items: center; gap: 7px; margin: 14px 0 0; padding: 7px 10px; border: 0; border-radius: 99px; background: #f4d986; cursor: pointer; font-size: 10px; }
@@ -259,6 +261,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .detail-state h1 { max-width: 700px; font: 800 clamp(44px, 7vw, 76px)/1 var(--display); letter-spacing: -.08em; }
 .detail-state .text-link { margin-top: 18px; }
 .detail-page { width: min(100% - 112px, 1230px); margin: 0 auto; padding: 122px 0 85px; }
+.detail-related-error { margin: 0 0 28px; padding: 13px 15px; border-left: 2px solid var(--orange); color: #865133; background: #f7f0e2; font-size: 12px; }
 .detail-back { display: flex; justify-content: space-between; padding-bottom: 13px; border-bottom: 1px solid var(--line); color: #77746c; font-size: 9px; font-weight: 700; letter-spacing: .11em; }
 .detail-back a { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-size: 11px; letter-spacing: 0; }
 .detail-back > span span { padding-left: 6px; color: var(--orange); font-size: 14px; }

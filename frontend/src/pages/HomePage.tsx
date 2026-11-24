@@ -3,23 +3,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { getMovies } from "../services/api";
 import type { Movie } from "../types";
+import { genreStyles } from "../data/genres";
 import { GenreCard, type GenreItem } from "../components/GenreCard";
 import { MovieCarousel } from "../components/MovieCarousel";
-
-const genreStyles: Record<string, { label: string; color: string; symbol: string }> = {
-  Action: { label: "Acción", color: "#ff8c70", symbol: "↗" },
-  Adventure: { label: "Aventura", color: "#bed88f", symbol: "✳" },
-  Animation: { label: "Animación", color: "#c5b8ee", symbol: "◉" },
-  Comedy: { label: "Comedia", color: "#f6d763", symbol: "☺" },
-  Crime: { label: "Crimen", color: "#f4b1c6", symbol: "⌁" },
-  Drama: { label: "Drama", color: "#b9dbe4", symbol: "✴" },
-  Fantasy: { label: "Fantasía", color: "#c7b5ee", symbol: "✦" },
-  Horror: { label: "Terror", color: "#ff9f87", symbol: "◒" },
-  Romance: { label: "Romance", color: "#f3b4ca", symbol: "♡" },
-  "Sci-Fi": { label: "Ciencia ficción", color: "#acc7fa", symbol: "✳" },
-  Thriller: { label: "Suspense", color: "#c5c6e8", symbol: "⌁" },
-  Western: { label: "Western", color: "#eacb8b", symbol: "✹" },
-};
 
 function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: ReactNode; action?: ReactNode }) {
   return (
@@ -35,6 +21,7 @@ export function HomePage() {
   const [genres, setGenres] = useState<GenreItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [genreError, setGenreError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -55,7 +42,7 @@ export function HomePage() {
           .slice(0, 9)
           .map((name) => ({ name, ...genreStyles[name] })));
       })
-      .catch(() => undefined);
+      .catch((reason: Error) => { if (active) setGenreError(reason.message); });
     return () => { active = false; };
   }, []);
 
@@ -115,7 +102,9 @@ export function HomePage() {
           <SectionHeading eyebrow="Elige tu propio camino" title={<>Un género.<br /><span>Otro universo.</span></>} action={<Compass size={29} strokeWidth={1.4} />} />
           {genres.length ? (
             <div className="genre-grid">{genres.map((genre, index) => <GenreCard genre={genre} index={index} key={genre.name} />)}</div>
-          ) : <p className="genre-empty">Los géneros aparecerán cuando el catálogo esté disponible.</p>}
+          ) : <p className="genre-empty" role={genreError ? "status" : undefined}>
+            {genreError ? `No se pudieron cargar los géneros: ${genreError}` : "No hay géneros disponibles para mostrar en esta selección."}
+          </p>}
           <Link className="genre-all" to="/explorar">Explorar todos los géneros <ArrowUpRight size={17} /></Link>
         </div>
       </section>

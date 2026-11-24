@@ -2,6 +2,27 @@ import type { Movie, PageResult, Review, ReviewReceipt } from "../types";
 
 const gatewayUrl = (import.meta.env.VITE_GATEWAY_URL || "http://localhost:8000").replace(/\/$/, "");
 
+type ApiMovie = Omit<Movie, "imdb"> & {
+  imdb?: Omit<NonNullable<Movie["imdb"]>, "rating"> & { rating?: number | string };
+};
+
+function normalizeMovie(movie: ApiMovie): Movie {
+  const rawRating = movie.imdb?.rating;
+  const rating = typeof rawRating === "string"
+    ? Number(rawRating.trim().replace(",", "."))
+    : rawRating;
+
+  return {
+    ...movie,
+    imdb: movie.imdb
+      ? {
+          ...movie.imdb,
+          rating: typeof rating === "number" && Number.isFinite(rating) ? rating : undefined,
+        }
+      : undefined,
+  };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -9,7 +30,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: { "Content-Type": "application/json", ...init?.headers },
     });
-  } catch (error) {
+  } catch {
     throw new Error("No se pudo conectar con el servidor. Comprueba que esté disponible.");
   }
 
@@ -39,11 +60,14 @@ export function getMovies(query: MovieQuery = {}) {
   if (query.genre) params.set("genre", query.genre);
   params.set("page", String(query.page ?? 1));
   params.set("page_size", String(query.pageSize ?? 20));
-  return request<PageResult<Movie>>(`/api/movies?${params}`);
+  return request<PageResult<ApiMovie>>(`/api/movies?${params}`).then((result) => ({
+    ...result,
+    items: result.items.map(normalizeMovie),
+  }));
 }
 
 export function getMovie(movieId: string) {
-  return request<Movie>(`/api/movies/${encodeURIComponent(movieId)}`);
+  return request<ApiMovie>(`/api/movies/${encodeURIComponent(movieId)}`).then(normalizeMovie);
 }
 
 export function getReviews(movieId: string, page = 1) {

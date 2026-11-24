@@ -3,13 +3,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { MovieCard } from "../components/MovieCard";
 import { getMovies } from "../services/api";
+import { genreLabel } from "../data/genres";
 import type { Movie } from "../types";
-
-const genreLabels: Record<string, string> = {
-  Action: "Acción", Adventure: "Aventura", Animation: "Animación", Comedy: "Comedia",
-  Crime: "Crimen", Drama: "Drama", Fantasy: "Fantasía", Horror: "Terror",
-  Romance: "Romance", "Sci-Fi": "Ciencia ficción", Thriller: "Suspense", Western: "Western",
-};
 
 export function ExplorePage() {
   const [params, setParams] = useSearchParams();
@@ -19,6 +14,7 @@ export function ExplorePage() {
   const [searchText, setSearchText] = useState(query);
   const [movies, setMovies] = useState<Movie[]>([]);
   const [availableGenres, setAvailableGenres] = useState<string[]>([]);
+  const [genresError, setGenresError] = useState("");
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -44,9 +40,12 @@ export function ExplorePage() {
     let active = true;
     getMovies({ pageSize: 100 })
       .then((result) => {
-        if (active) setAvailableGenres([...new Set(result.items.flatMap((movie) => movie.genres ?? []))].sort());
+        if (active) {
+          setAvailableGenres([...new Set(result.items.flatMap((movie) => movie.genres ?? []))].sort());
+          setGenresError("");
+        }
       })
-      .catch(() => undefined);
+      .catch((reason: Error) => { if (active) setGenresError(reason.message); });
     return () => { active = false; };
   }, []);
 
@@ -91,17 +90,18 @@ export function ExplorePage() {
           <div className="select-wrap">
             <select aria-label="Filtrar por género" value={genre} onChange={(event) => updateParams({ genre: event.target.value })}>
               <option value="">Todos los géneros</option>
-              {availableGenres.map((item) => <option value={item} key={item}>{genreLabels[item] ?? item}</option>)}
+              {availableGenres.map((item) => <option value={item} key={item}>{genreLabel(item)}</option>)}
             </select>
           </div>
           <div className="filter-count">{total.toLocaleString("es-ES")} {total === 1 ? "película" : "películas"}</div>
-          <label className="sort-wrap"><ArrowDownWideNarrow size={16} /><span>Ordenar</span>
+          <label className="sort-wrap"><ArrowDownWideNarrow size={16} /><span>Ordenar página</span>
             <select value={sort} aria-label="Ordenar películas" onChange={(event) => setSort(event.target.value)}>
               <option value="title">Título A—Z</option><option value="year">Más recientes</option><option value="rating">Mejor nota</option>
             </select>
           </label>
         </div>
-        {genre && <button className="active-filter" onClick={() => updateParams({ genre: "" })}>{genreLabels[genre] ?? genre}<X size={14} /></button>}
+        {genresError && <p className="filter-warning" role="status">No se pudieron cargar todas las opciones de género: {genresError}</p>}
+        {genre && <button className="active-filter" onClick={() => updateParams({ genre: "" })}>{genreLabel(genre)}<X size={14} /></button>}
         {loading ? <div className="catalogue-loading">Buscando en el archivo<span>…</span></div> :
           error ? <div className="catalogue-error"><strong>No pudimos cargar el catálogo.</strong><p>{error}</p><button className="text-link" onClick={() => setParams(new URLSearchParams(params))}>Volver a intentar <ArrowRight size={16} /></button></div> :
           sortedMovies.length ? <>

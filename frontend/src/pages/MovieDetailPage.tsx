@@ -10,6 +10,7 @@ export function MovieDetailPage({ userId }: { userId: string }) {
   const [movie, setMovie] = useState<Movie | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [related, setRelated] = useState<Movie[]>([]);
+  const [relatedError, setRelatedError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [rating, setRating] = useState(0);
@@ -21,6 +22,8 @@ export function MovieDetailPage({ userId }: { userId: string }) {
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setRelated([]);
+    setRelatedError("");
     Promise.all([getMovie(movieId), getReviews(movieId)])
       .then(([detail, reviewPage]) => {
         if (!active) return;
@@ -30,12 +33,19 @@ export function MovieDetailPage({ userId }: { userId: string }) {
         const genre = detail.genres?.[0];
         if (genre) {
           getMovies({ genre, pageSize: 8 }).then((moviePage) => {
-            if (active) setRelated(moviePage.items.filter((item) => item._id !== detail._id).slice(0, 6));
-          }).catch(() => {
-            if (active) setRelated([]);
+            if (active) {
+              setRelated(moviePage.items.filter((item) => item._id !== detail._id).slice(0, 6));
+              setRelatedError("");
+            }
+          }).catch((reason: Error) => {
+            if (active) {
+              setRelated([]);
+              setRelatedError(reason.message);
+            }
           });
         } else {
           setRelated([]);
+          setRelatedError("");
         }
       })
       .catch((reason: Error) => { if (active) setError(reason.message); })
@@ -113,6 +123,7 @@ export function MovieDetailPage({ userId }: { userId: string }) {
         </form>
       </section>
 
+      {relatedError && <p className="detail-related-error" role="status">No se pudo cargar más del mismo género: {relatedError}</p>}
       {related.length > 0 && <section className="detail-similar"><div className="section-topline"><span>OTRAS VENTANAS</span><span>MISMO GÉNERO · {movie.genres?.[0]}</span></div><div className="section-heading"><div><p className="eyebrow">Sigue explorando</p><h2>Más historias de {movie.genres?.[0]}</h2></div><Link className="text-link" to={`/explorar?genre=${encodeURIComponent(movie.genres?.[0] ?? "")}`}>Ver género <ArrowUpRight size={16} /></Link></div><MovieCarousel movies={related} /></section>}
     </main>
   );

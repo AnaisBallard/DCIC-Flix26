@@ -6,30 +6,29 @@ import { AuditPage } from "./pages/AuditPage";
 import { ExplorePage } from "./pages/ExplorePage";
 import { HomePage } from "./pages/HomePage";
 import { MovieDetailPage } from "./pages/MovieDetailPage";
-
-const profileStorageKey = "dcic-flix-profiles";
-
-function initialUserId() {
-  try {
-    const stored = localStorage.getItem(profileStorageKey);
-    if (stored) {
-      const profiles = JSON.parse(stored) as { id?: string }[];
-      if (Array.isArray(profiles) && profiles[0]?.id) return profiles[0].id;
-    }
-  } catch {
-    localStorage.removeItem(profileStorageKey);
-  }
-  const profile = { id: `usr_${crypto.randomUUID()}`, label: "Mi perfil" };
-  localStorage.setItem(profileStorageKey, JSON.stringify([profile]));
-  return profile.id;
-}
+import { addProfile, loadProfiles } from "./services/profiles";
 
 function App() {
-  const [userId, setUserId] = useState(initialUserId);
+  const [profileState, setProfileState] = useState(loadProfiles);
+  const [userId, setUserId] = useState(() => profileState.profiles[0].id);
+
+  function handleAddProfile() {
+    const next = addProfile(profileState.profiles);
+    setProfileState(next);
+    setUserId(next.profiles[next.profiles.length - 1].id);
+    return Boolean(next.warning);
+  }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#contenido">Saltar al contenido</a>
-      <Header userId={userId} onUserChange={setUserId} />
+      <Header
+        userId={userId}
+        profiles={profileState.profiles}
+        storageWarning={profileState.warning}
+        onUserChange={setUserId}
+        onAddProfile={handleAddProfile}
+      />
       <div id="contenido">
         <Routes>
           <Route path="/" element={<HomePage />} />

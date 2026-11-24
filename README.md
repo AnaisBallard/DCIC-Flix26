@@ -1,123 +1,175 @@
 # DCIC-Flix26
 
-Plateforme universitaire de découverte de films en microservices. Le frontend
-propose une expérience éditoriale en espagnol et se connecte au catalogue et aux
-critiques via la gateway; le nettoyage et les recommandations métier restent à
-développer.
+Plataforma universitaria para descubrir películas. El repositorio reúne una
+interfaz React, una gateway HTTP, servicios FastAPI, MongoDB, RabbitMQ y
+contenedores Docker. El catálogo, las fichas y las críticas están conectados;
+el agente de limpieza y el recomendador todavía no implementan su lógica de
+negocio.
 
-## Prérequis
+Esta guía explica cómo ejecutar el proyecto, qué hace cada parte y cómo verificar
+los resultados. La arquitectura y los contratos se describen con más detalle en
+[docs/architecture.md](docs/architecture.md) y
+[docs/contracts.md](docs/contracts.md). Las decisiones y los temas que el equipo
+debe confirmar están en [docs/decisions.md](docs/decisions.md).
 
-- Docker avec Docker Compose v2
-- Node.js 24 et npm 11 pour le développement frontend hors conteneur
-- Python 3.13 pour le développement des services hors conteneur
+## Estado actual y límites
 
-## Démarrage avec Docker Compose
+| Parte | Estado comprobable |
+| --- | --- |
+| Interfaz en español | Inicio, catálogo, fichas, críticas y estado de servicios |
+| Gateway y catálogo | Búsqueda, filtro, paginación, detalle y críticas históricas |
+| Publicación de críticas | Validación en la API y publicación persistente en RabbitMQ |
+| Consumer | Validación, escritura idempotente en MongoDB y confirmación del mensaje |
+| Carga del dataset | Importación de los archivos `.json` y `.json.gz` admitidos |
+| Limpieza con LLM | Infraestructura preparada; limpieza de datos todavía no implementada |
+| Recomendación TF-IDF | Servicio esqueleto; algoritmo y API de recomendaciones todavía no implementados |
+| Auditoría de datos | `/audit` enseña el estado real de servicios; aún no hay informes de limpieza |
+| Autenticación | No implementada. El selector crea perfiles locales para identificar críticas durante el desarrollo |
 
-Depuis `DCIC-Flix26/` :
+La topología de RabbitMQ incluye colas de votos y limpieza para preparar trabajo
+futuro; esto **no** significa que ya existan las rutas de publicación,
+consumidores o procesos de negocio correspondientes. La interfaz no inventa
+películas, recomendaciones, críticas ni resultados de limpieza.
+
+## Requisitos
+
+- Docker Desktop o Docker Engine con Docker Compose v2.
+- Node.js y npm con las versiones compatibles con `frontend/package.json` para
+  desarrollar el frontend fuera de Docker.
+- Python 3.13 para ejecutar los servicios o sus pruebas fuera de Docker.
+- Acceso a Internet durante la primera instalación de imágenes o paquetes.
+
+Las versiones JavaScript están fijadas en `frontend/package.json` y en
+`frontend/package-lock.json`. Cada servicio Python fija sus dependencias en su
+propio `requirements.txt`; sus imágenes base se fijan en los `Dockerfile`.
+Antes de actualizar una dependencia, revisa su uso, compatibilidad, avisos de
+seguridad y archivo de bloqueo.
+
+La revisión de dependencias encontró cinco avisos npm de nivel alto en Vite,
+`@vitejs/plugin-react` y dependencias transitivas. La corrección que propone el
+registro cambia versiones mayores y, para Vite, incluso propone una versión
+anterior a la fijada. No se aplicó una actualización forzada: investiga cada
+aviso, confirma una combinación compatible con Node y Vite, y ejecuta el build
+antes de aceptar una actualización.
+
+## Empezar con Docker Compose
+
+Abre PowerShell en la carpeta `DCIC-Flix26`. Crea `.env` una sola vez a partir
+de los valores de desarrollo:
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up --build
+docker compose up --build -d
+docker compose ps
+docker compose logs -f frontend gateway
 ```
 
-- Frontend Vite : <http://localhost:5173>
-- Gateway : <http://localhost:8000>; état global : <http://localhost:8000/api/health>
-- MongoDB et RabbitMQ ne publient aucun port sur l’hôte; ils sont accessibles
-  uniquement depuis les réseaux internes et les commandes `docker compose exec`.
+Cuando Vite esté listo, abre:
 
-Compose initialise MongoDB sur son volume neuf, crée des comptes applicatifs
-séparés et importe automatiquement les fichiers `*.json` et `*.json.gz` du
-dataset présent au démarrage. Le chargement est idempotent par empreinte de
-fichier; les documents source doivent inclure `_id`. Un dossier sans données est
-signalé dans les logs, sans génération de données artificielles.
+- Aplicación: <http://localhost:5173>
+- Gateway pública: <http://localhost:8000>
+- Estado agregado: <http://localhost:8000/api/health>
 
-RabbitMQ importe exchanges, queues, bindings et files de lettres mortes depuis
-`rabbitmq/definitions.json`. La gateway transmet les requêtes catalogue et
-critiques aux services dédiés; les interactions ne sont stockées dans MongoDB
-qu’après publication RabbitMQ et consommation par le consumer. Les contrats
-HTTP et événements sont décrits dans [docs/contracts.md](docs/contracts.md).
-Le nettoyage et les recommandations ne sont pas implémentés. L’interface
-l’indique sans afficher de recommandations ni de statistiques d’audit fictives.
-
-### Interface web
-
-- `/` : accueil éditorial, affiches du dataset et genres disponibles.
-- `/explorar` : recherche, filtre par genre, tri et pagination du catalogue.
-- `/pelicula/{movie_id}` : fiche, critiques existantes et formulaire d’avis.
-- `/audit` : état réel des services; les rapports de nettoyage et du LLM sont
-  signalés comme indisponibles jusqu’à l’ajout de leurs API.
-
-Les profils sont locaux au navigateur; leurs identifiants servent aux critiques.
-Le frontend ne communique qu’avec la gateway. Les affiches sont celles fournies
-par le catalogue, sans films de démonstration.
-
-Au démarrage, `rabbitmq-init` synchronise le mot de passe déclaré dans `.env`
-avec le compte du volume RabbitMQ persistant et configure ses permissions. Cela
-évite qu’un volume créé avec un ancien mot de passe empêche les services de se
-connecter; les données et la topologie RabbitMQ ne sont pas supprimées.
-
-Routes principales :
-
-| Route | Fonction |
-| --- | --- |
-| `GET /api/movies?q=&genre=&page=1&page_size=20` | Rechercher et filtrer le catalogue |
-| `GET /api/movies/{movie_id}` | Consulter un film |
-| `GET /api/movies/{movie_id}/reviews` | Lire les critiques historiques |
-| `POST /api/interactions/reviews` | Publier une note et un commentaire |
-| `GET /api/health` | Vérifier les services aval, dont MongoDB et RabbitMQ via leurs services |
-
-La recherche catalogue porte sur le titre, le résumé et le synopsis. Les
-identifiants de film sont les ObjectId MongoDB du dataset (24 caractères
-hexadécimaux). La lecture des critiques n’expose pas les adresses e-mail.
-
-Les identifiants de `.env.example` sont réservés au développement local.
-Remplacez-les avant tout déploiement partagé. Gardez les identifiants MongoDB
-compatibles avec les URI (caractères alphanumériques, `_` et `-`) ou encodez-les
-en URL. La clé `OPENAI_API_KEY` est facultative tant que le nettoyage LLM n’est
-pas développé.
-
-### Contrôles d’infrastructure (PowerShell)
+Para detener los contenedores sin borrar los datos, usa `Ctrl+C` si ejecutaste
+Compose en primer plano o ejecuta:
 
 ```powershell
-docker compose ps
-docker compose logs dataset-loader
-
-# MongoDB : ping root, puis accès en lecture avec le compte du catalogue.
-docker compose exec mongodb mongosh --quiet --username flix --password flix_local_dev_only --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 })'
-docker compose exec mongodb mongosh --quiet --username flix_catalog --password catalog_local_dev --authenticationDatabase peliculas-proyectos peliculas-proyectos --eval 'db.movies.countDocuments()'
-
-# RabbitMQ : vérifier les exchanges, files et bindings provisionnés au démarrage.
-docker compose exec rabbitmq rabbitmqctl list_exchanges name type
-docker compose exec rabbitmq rabbitmqctl list_queues name durable messages
-docker compose exec rabbitmq rabbitmqctl list_bindings source_name destination_name routing_key
-
-# Le frontend ne doit pas pouvoir résoudre les services de données.
-docker compose exec frontend node -e "require('dns').lookup('mongodb',e=>{if(!e){console.error('ERREUR: mongodb est resolvable');process.exit(1)}console.log('OK: mongodb non resolvable ('+e.code+')')})"
-docker compose exec frontend node -e "require('dns').lookup('rabbitmq',e=>{if(!e){console.error('ERREUR: rabbitmq est resolvable');process.exit(1)}console.log('OK: rabbitmq non resolvable ('+e.code+')')})"
-
-# Inspecter les réseaux réellement attachés aux conteneurs.
-$frontendId = docker compose ps -q frontend
-$mongoId = docker compose ps -q mongodb
-docker inspect --format '{{json .NetworkSettings.Networks}}' $frontendId
-docker inspect --format '{{json .NetworkSettings.Networks}}' $mongoId
-
-# MongoDB et RabbitMQ ne doivent pas écouter sur des ports de l’hôte.
-Test-NetConnection localhost -Port 27017 -InformationLevel Quiet
-Test-NetConnection localhost -Port 5672 -InformationLevel Quiet
-
-# Le service catalogue, lui, doit résoudre MongoDB sur le réseau data.
-docker compose exec catalog-service python -c "import socket; print('MongoDB:', socket.gethostbyname('mongodb'))"
+docker compose down
 ```
 
-Les deux tests de port doivent retourner `False`; l’inspection réseau doit
-montrer uniquement `frontend_gateway` pour le frontend et `data` pour MongoDB.
-Les recherches DNS du frontend vers `mongodb` et `rabbitmq` doivent échouer.
-Les commandes avec identifiants utilisent les valeurs d’exemple; adaptez-les à
-votre `.env` si vous les avez remplacées.
+`docker compose down` conserva los volúmenes con los datos de MongoDB y
+RabbitMQ. **No** uses `docker compose down -v` salvo que quieras eliminar
+deliberadamente esos datos y puedas volver a inicializarlos.
 
-## Développement local
+La primera compilación descarga imágenes y dependencias, por lo que puede tardar.
+El frontend espera a que la gateway esté sana; la gateway espera a los servicios
+HTTP necesarios, y el catálogo, el consumer y el servicio de recomendaciones
+esperan al cargador de datos. Consulta `docker compose ps` y los registros con
+`docker compose logs <servicio>` cuando un contenedor no llegue al estado
+esperado. El cargador y `rabbitmq-init` son tareas de inicialización y es normal
+que terminen con código cero.
 
-Frontend :
+## Configuración y secretos
+
+Compose lee la configuración local de `.env`; el archivo `.env.example` enumera
+las variables, los valores de desarrollo y su finalidad:
+
+- `MONGO_INITDB_ROOT_*`: cuenta administrativa usada solo para inicialización y
+  carga.
+- `MONGODB_DATABASE`: base que contiene el catálogo y las críticas.
+- `MONGODB_CATALOG_*`, `MONGODB_RECOMMENDATION_*` y `MONGODB_CONSUMER_*`:
+  cuentas separadas para limitar los permisos de cada servicio.
+- `RABBITMQ_DEFAULT_*`: cuenta usada por los servicios productores y
+  consumidores. `rabbitmq-init` sincroniza esa cuenta con el volumen persistente
+  cuando se cambia la contraseña.
+- `OPENAI_API_KEY` y `OPENAI_MODEL`: previstos para una futura integración del
+  agente de limpieza. La clave es opcional mientras esa lógica no esté activa.
+
+Los valores de ejemplo son **solo para desarrollo local**; cámbialos antes de
+compartir un entorno. No guardes `.env`, contraseñas ni claves en Git. La clave
+del LLM debe permanecer en un servicio del backend: nunca la pongas en variables
+`VITE_*`, porque esas variables se incorporan al código enviado al navegador.
+MongoDB y RabbitMQ no publican puertos en el host; la aplicación web solo habla
+con la gateway.
+
+## Datos del catálogo
+
+El directorio `dataset/` contiene las fuentes universitarias comprimidas. El
+servicio `dataset-loader` puede importar archivos `.json` y `.json.gz` de la
+raíz de ese directorio; el montaje es de solo lectura y no modifica los
+originales. Los documentos deben tener `_id` para poder importarse de forma
+idempotente. El cargador reconoce los formatos JSON documentados en
+[docs/architecture.md](docs/architecture.md), crea o actualiza los registros
+por identificador y evita volver a cargar un archivo cuyo hash no haya
+cambiado.
+
+Para explorar la estructura sin imprimir valores personales ni modificar
+fuentes o MongoDB, ejecuta `py -3.13 dataset\profile_dataset.py`. Los recuentos,
+las limitaciones y las reglas para interpretar sus indicadores están en
+[docs/data-profile.md](docs/data-profile.md).
+
+MongoDB ejecuta `dataset/mongo-init.sh` al inicializar un volumen nuevo. Como
+los scripts de `/docker-entrypoint-initdb.d/` se ejecutan solamente en una
+inicialización limpia, el cargador también reconcilia cuentas e índices en
+arranques posteriores. Añadir o cambiar datos debe hacerse en los archivos
+originales del dataset y verificarse en MongoDB; el proceso de importación no es
+un proceso de limpieza semántica. No marques el conjunto como limpio hasta
+inspeccionar las anomalías y validar un proceso explícito de limpieza.
+
+Comprobaciones rápidas en PowerShell (las contraseñas son las del `.env`
+generado; adapta los comandos si las cambiaste):
+
+```powershell
+docker compose logs dataset-loader
+docker compose exec mongodb mongosh --quiet --username flix --password flix_local_dev_only --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 })'
+docker compose exec mongodb mongosh --quiet --username flix_catalog --password catalog_local_dev --authenticationDatabase peliculas-proyectos peliculas-proyectos --eval 'db.movies.countDocuments()'
+```
+
+## Aplicación web
+
+La interfaz está escrita en React y TypeScript, se compila con Vite y aplica
+Tailwind CSS junto con estilos propios del sistema visual. Todas las etiquetas
+de usuario están en español. Las rutas implementadas son:
+
+| Ruta | Uso |
+| --- | --- |
+| `/` | Portada editorial y selección del catálogo disponible |
+| `/explorar` | Búsqueda por título o argumento, género, orden de la página visible y paginación |
+| `/pelicula/{movie_id}` | Ficha, críticas y formulario para enviar una crítica |
+| `/audit` | Estado de servicios y explicación de informes aún no disponibles |
+
+El selector de perfil guarda identificadores aleatorios en el almacenamiento
+local del navegador; no valida una identidad y no sustituye un sistema de
+autenticación. Las notas publicadas se transmiten al backend mediante la
+gateway. La lista de géneros se obtiene de una muestra paginada del catálogo;
+hasta que exista un endpoint de géneros, no se puede prometer que el selector
+incluya todas las categorías del conjunto de datos.
+
+El orden del catálogo se aplica a la página que ya devolvió el servidor, no a
+los miles de registros del conjunto completo. Para ofrecer orden global hace
+falta añadir y probar el parámetro de orden en la API.
+
+Para desarrollar solo el frontend mientras los servicios están en Docker:
 
 ```powershell
 Set-Location frontend
@@ -125,9 +177,40 @@ npm ci
 npm run dev
 ```
 
-Chaque service Python possède son propre `requirements.txt` et son propre
-`Dockerfile`. Pour créer un environnement virtuel et installer, par exemple,
-celui de la gateway :
+El servidor de desarrollo utiliza `http://localhost:5173` y consulta la gateway
+en `http://localhost:8000`. Si ejecutas la gateway en otro origen, configura la
+URL permitida de CORS en el backend. Antes de integrar cambios, ejecuta:
+
+```powershell
+npm run build
+```
+
+`npm ci` restaura exactamente el árbol de dependencias del archivo de bloqueo;
+no edites `package-lock.json` manualmente. Si cambias una dependencia directa,
+usa npm y revisa ambos archivos del manifiesto.
+
+## Servicios y API pública
+
+La gateway es el único punto de entrada HTTP de la interfaz. Sus rutas públicas
+actuales son:
+
+| Método y ruta | Función |
+| --- | --- |
+| `GET /api/health` | Estado agregado de los servicios consultados |
+| `GET /api/movies?q=&genre=&page=1&page_size=20` | Buscar, filtrar y paginar películas |
+| `GET /api/movies/{movie_id}` | Consultar la ficha de una película |
+| `GET /api/movies/{movie_id}/reviews?page=1&page_size=20` | Leer críticas existentes |
+| `POST /api/interactions/reviews` | Publicar una nota y una crítica |
+
+Los contratos de parámetros, validación, respuestas, evento y errores se
+mantienen en un único documento: [docs/contracts.md](docs/contracts.md). Antes
+de cambiar un contrato, actualiza productor, consumidor, frontend, pruebas y
+documentación como una misma unidad de trabajo.
+
+## Desarrollo de los servicios Python
+
+Cada servicio mantiene sus dependencias en su propio directorio. Por ejemplo,
+para ejecutar localmente la gateway en Windows:
 
 ```powershell
 Set-Location gateway
@@ -137,10 +220,16 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Tests backend
+La gateway local necesita que los servicios destino estén disponibles y que
+sus URL estén configuradas para el entorno elegido. Docker Compose ya configura
+los nombres DNS y las variables necesarios para la ejecución integrada; no
+copies sin revisar las URL internas `http://<servicio>:8000` a una ejecución
+fuera de Docker.
 
-Depuis la racine du dépôt, installez les dépendances de test dans un
-environnement virtuel Python 3.13, puis lancez toutes les suites :
+## Pruebas y verificaciones
+
+Desde la raíz, crea un entorno de pruebas e instala las dependencias de
+desarrollo de los servicios con pruebas:
 
 ```powershell
 py -3.13 -m venv .venv
@@ -149,53 +238,77 @@ python -m pip install -r gateway\requirements-dev.txt -r catalog-service\require
 python -m pytest -q
 ```
 
-Les tests couvrent les validations, la recherche/pagination, le filtrage des
-champs privés, l’idempotence, l’acquittement après persistance et les erreurs
-de broker/base. Le test de flux exerce la gateway et les applications HTTP
-réelles des services catalogue et interaction dans le même processus, avec des
-adaptateurs simulés pour MongoDB et RabbitMQ. Pour vérifier les conteneurs et
-les connexions aux vraies instances MongoDB/RabbitMQ, Docker Desktop doit être
-démarré.
+Las pruebas unitarias comprueban validaciones, consultas del catálogo, datos
+privados, publicación, idempotencia, acuse de recibo y confirmación de
+persistencia de mensajes, además del manejo de errores.
+`gateway/tests/test_service_flow.py` ejercita las aplicaciones HTTP en un flujo
+conjunto con adaptadores simulados; no reemplaza una comprobación integrada
+contra los contenedores reales.
 
-## Structure
+Para comprobar la infraestructura activa:
 
-| Répertoire | Responsabilité prévue |
+```powershell
+docker compose ps
+docker compose exec rabbitmq rabbitmqctl list_exchanges name type
+docker compose exec rabbitmq rabbitmqctl list_queues name durable messages
+docker compose exec rabbitmq rabbitmqctl list_bindings source_name destination_name routing_key
+```
+
+Verifica la separación de redes: el frontend debe poder resolver la gateway,
+pero no `mongodb` ni `rabbitmq`; MongoDB solo debe estar conectado a `data`, y
+RabbitMQ solo a `messaging`. Prueba la resolución desde el contenedor:
+
+```powershell
+docker compose exec frontend node -e "require('dns').lookup('mongodb',e=>{if(!e){console.error('mongodb es accesible');process.exit(1)}console.log('OK: mongodb aislado')})"
+docker compose exec frontend node -e "require('dns').lookup('rabbitmq',e=>{if(!e){console.error('rabbitmq es accesible');process.exit(1)}console.log('OK: rabbitmq aislado')})"
+```
+
+Consulta [docs/architecture.md](docs/architecture.md) para entender por qué
+estas pruebas son importantes y cuáles son las redes esperadas.
+
+## Estructura del repositorio
+
+| Ruta | Responsabilidad |
 | --- | --- |
-| `frontend/` | Interface React, TypeScript, Vite et Tailwind CSS |
-| `gateway/` | Point d’entrée HTTP pour le frontend |
-| `catalog-service/` | Accès au catalogue MongoDB |
-| `cleaning-agent/` | Nettoyage des données ambiguës avec un LLM |
-| `recommendation-service/` | Recommandations TF-IDF et similarité cosinus avec scikit-learn |
-| `interaction-service/` | Réception des votes et critiques, publication RabbitMQ |
-| `consumer/` | Consommation des événements et persistance MongoDB |
-| `dataset-loader/` | Import idempotent du dataset et initialisation des comptes MongoDB |
-| `dataset/` | Archives du dataset universitaire fournies avec le projet |
-| `docs/` | Documentation d’architecture |
+| `frontend/` | Interfaz, componentes, páginas, cliente API y compilación web |
+| `gateway/` | Validación de solicitudes públicas y comunicación con servicios internos |
+| `catalog-service/` | Lectura, búsqueda y serialización del catálogo en MongoDB |
+| `interaction-service/` | Validación y publicación de interacciones en RabbitMQ |
+| `consumer/` | Validación de eventos y persistencia idempotente de críticas |
+| `cleaning-agent/` | Esqueleto para limpieza asistida por LLM; lógica todavía pendiente |
+| `recommendation-service/` | Esqueleto de recomendaciones; TF-IDF todavía pendiente |
+| `dataset-loader/` | Importación del dataset, cuentas e índices |
+| `dataset/` | Archivos fuente, inicialización de MongoDB y perfilador de solo lectura |
+| `rabbitmq/` | Configuración del broker, topología y sincronización de credenciales |
+| `docs/` | Arquitectura, contratos y decisiones explicadas |
+| `docker-compose.yml` | Arranque, redes, dependencias, volúmenes y healthchecks |
+| `.env.example` | Lista de variables de desarrollo; no contiene credenciales de producción |
 
-Voir [docs/architecture.md](docs/architecture.md) pour les limites de services
-et le flux cible.
+## Flujo de trabajo para contribuir
 
-## Versions retenues
+1. Acordar y dibujar con el equipo el límite del servicio, sus dependencias y el
+   contrato antes de pedir o implementar un cambio.
+2. Crear una rama y mantener cada cambio pequeño y con un propósito claro.
+3. Revisar `git status` y `git diff` antes de aceptar cambios; explicar cada
+   archivo modificado y descartar aquello que no sea necesario.
+4. Ejecutar las pruebas relevantes y comprobar sus resultados observables; un
+   mensaje de éxito del asistente no sustituye la evidencia.
+5. Pedir a otra persona del equipo que lea el diff, explique el comportamiento
+   y pueda responder preguntas antes de integrar el cambio.
+6. Actualizar contratos y documentación cuando cambie el comportamiento.
+7. Registrar los commits pequeños con mensajes que expliquen el cambio.
 
-Les dépendances Python et JavaScript sont épinglées à des versions précises;
-`frontend/package-lock.json` verrouille également l’arbre npm transitif. Les
-images Docker utilisent des tags précis.
+La lista anterior es un proceso recomendado, no una garantía automática:
+la aprobación por dos integrantes debe comprobarse en el flujo de revisión de
+Git del equipo.
 
-| Composant | Version |
-| --- | --- |
-| Node.js (frontend) | 24.11.1 |
-| React / React DOM | 19.3.1 / 19.3.1 |
-| React Router | 7.18.5 |
-| Lucide React | 1.74.0 |
-| TypeScript | 7.0.2 |
-| Vite / plugin React | 8.3.8 / 6.3.0 |
-| Tailwind CSS / plugin Vite | 4.3.5 |
-| Python (services) | 3.13.7 |
-| FastAPI / Uvicorn | 0.163.1 / 0.54.0 |
-| PyMongo | 4.20.0 |
-| aio-pika | 10.2.3 |
-| OpenAI Python SDK | 3.52.0 |
-| scikit-learn | 1.9.1 |
-| MongoDB / RabbitMQ | 8.0.12 / 4.2.3-management |
+## Documentación
 
-Les versions seront réévaluées et mises à jour ensemble au fil du projet.
+- [Arquitectura](docs/architecture.md): límites, redes, persistencia, secuencias
+  de mensajes, estado real y riesgos.
+- [Contratos](docs/contracts.md): rutas HTTP, validaciones, esquemas, eventos y
+  errores entre productor y consumidor.
+- [Perfil de datos](docs/data-profile.md): indicadores estructurales del
+  dataset real, sin exponer texto o datos personales ni aplicar correcciones.
+- [Decisiones](docs/decisions.md): motivos, límites, consecuencias y preguntas
+  que requieren decisión humana.
